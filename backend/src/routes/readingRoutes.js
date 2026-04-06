@@ -6,7 +6,7 @@ const router = express.Router();
 
 router
   .route('/')
-  .post(protect, authorize('admin', 'manager', 'pumper'), createReading)
-  .get(protect, authorize('admin', 'manager', 'pumper'), getReadings);
+  .post(protect, authorize('admin', 'manager', 'pumpOperator'), createReading)
+  .get(protect, authorize('admin', 'manager', 'pumpOperator'), getReadings);
 
 export default router;

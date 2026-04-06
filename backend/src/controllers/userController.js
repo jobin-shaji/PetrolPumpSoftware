@@ -1,26 +1,9 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
-import PumpUnit from '../models/PumpUnit.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
-const validateAssignedUnit = async (assignedUnit) => {
-  if (!assignedUnit) {
-    return null;
-  }
-
-  const unit = await PumpUnit.findOne({ _id: assignedUnit, isActive: true });
-
-  if (!unit) {
-    const error = new Error('Assigned unit is invalid');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  return unit._id;
-};
-
 export const createUser = asyncHandler(async (req, res) => {
-  const { name, email, password, role, assignedUnit } = req.body;
+  const { name, email, password, role } = req.body;
 
   if (!name || !email || !password || !role) {
     const error = new Error('Name, email, password, and role are required');
@@ -37,24 +20,20 @@ export const createUser = asyncHandler(async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const unitId = await validateAssignedUnit(assignedUnit);
 
   const user = await User.create({
     name,
     email,
     passwordHash,
     role,
-    assignedUnit: unitId,
   });
 
-  const populatedUser = await User.findById(user._id).populate('assignedUnit', 'name');
-  res.status(201).json(populatedUser);
+  const createdUser = await User.findById(user._id);
+  res.status(201).json(createdUser);
 });
 
 export const getUsers = asyncHandler(async (_req, res) => {
-  const users = await User.find({ isActive: true })
-    .populate('assignedUnit', 'name')
-    .sort({ createdAt: -1 });
+  const users = await User.find({ isActive: true }).sort({ createdAt: -1 });
 
   res.json(users);
 });
@@ -68,7 +47,7 @@ export const updateUser = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const { name, email, password, role, assignedUnit, isActive } = req.body;
+  const { name, email, password, role, isActive } = req.body;
 
   if (email && email !== user.email) {
     const existingEmail = await User.findOne({
@@ -81,10 +60,6 @@ export const updateUser = asyncHandler(async (req, res) => {
       error.statusCode = 400;
       throw error;
     }
-  }
-
-  if (assignedUnit !== undefined) {
-    user.assignedUnit = await validateAssignedUnit(assignedUnit);
   }
 
   if (password) {
@@ -109,7 +84,7 @@ export const updateUser = asyncHandler(async (req, res) => {
 
   await user.save();
 
-  const updatedUser = await User.findById(user._id).populate('assignedUnit', 'name');
+  const updatedUser = await User.findById(user._id);
   res.json(updatedUser);
 });
 

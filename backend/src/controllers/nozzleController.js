@@ -22,6 +22,12 @@ const validateReferences = async (tankId, unitId) => {
       error.statusCode = 400;
       throw error;
     }
+
+    if (unit.status === 'occupied') {
+      const error = new Error('Cannot assign a nozzle to an occupied unit');
+      error.statusCode = 400;
+      throw error;
+    }
   }
 };
 
@@ -104,6 +110,16 @@ export const updateNozzle = asyncHandler(async (req, res) => {
 
   const previousUnitId = nozzle.unit?.toString() || null;
 
+  if (previousUnitId && previousUnitId !== nextUnit?.toString()) {
+    const previousUnit = await PumpUnit.findOne({ _id: previousUnitId, isActive: true });
+
+    if (previousUnit?.status === 'occupied') {
+      const error = new Error('Cannot move a nozzle out of an occupied unit');
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
   nozzle.tank = nextTank;
   nozzle.unit = nextUnit || null;
 
@@ -144,6 +160,17 @@ export const deleteNozzle = asyncHandler(async (req, res) => {
   }
 
   const previousUnitId = nozzle.unit?.toString() || null;
+
+  if (previousUnitId) {
+    const previousUnit = await PumpUnit.findOne({ _id: previousUnitId, isActive: true });
+
+    if (previousUnit?.status === 'occupied') {
+      const error = new Error('Cannot delete a nozzle from an occupied unit');
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
   nozzle.isActive = false;
   nozzle.unit = null;
   await nozzle.save();

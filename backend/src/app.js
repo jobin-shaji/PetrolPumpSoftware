@@ -1,7 +1,6 @@
 import cors from 'cors';
 import express from 'express';
 import authRoutes from './routes/authRoutes.js';
-import assignmentRoutes from './routes/assignmentRoutes.js';
 import fuelTypeRoutes from './routes/fuelTypeRoutes.js';
 import nozzleRoutes from './routes/nozzleRoutes.js';
 import purchaseRoutes from './routes/purchaseRoutes.js';
@@ -10,6 +9,7 @@ import reportRoutes from './routes/reportRoutes.js';
 import shiftRoutes from './routes/shiftRoutes.js';
 import tankRoutes from './routes/tankRoutes.js';
 import unitRoutes from './routes/unitRoutes.js';
+import unitSessionRoutes from './routes/unitSessionRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 
@@ -33,7 +33,7 @@ app.use('/api/fuel-types', fuelTypeRoutes);
 app.use('/api/tanks', tankRoutes);
 app.use('/api/nozzles', nozzleRoutes);
 app.use('/api/units', unitRoutes);
-app.use('/api/assignments', assignmentRoutes);
+app.use('/api/unit-session', unitSessionRoutes);
 app.use('/api/shifts', shiftRoutes);
 app.use('/api/readings', readingRoutes);
 app.use('/api/purchases', purchaseRoutes);

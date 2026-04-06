@@ -18,6 +18,15 @@ const nozzleSchema = new mongoose.Schema(
       ref: 'PumpUnit',
       default: null,
     },
+    latestReading: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    latestReadingUpdatedAt: {
+      type: Date,
+      default: null,
+    },
     isActive: {
       type: Boolean,
       default: true,

@@ -20,7 +20,7 @@ export const login = asyncHandler(async (req, res) => {
   const user = await User.findOne({
     email: email.toLowerCase().trim(),
     isActive: true,
-  }).populate('assignedUnit', 'name');
+  });
 
   if (!user) {
     const error = new Error('Invalid email or password');
@@ -43,7 +43,7 @@ export const login = asyncHandler(async (req, res) => {
 });
 
 export const getCurrentUser = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id).populate('assignedUnit', 'name');
+  const user = await User.findById(req.user._id);
 
   res.json({
     user,

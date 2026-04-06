@@ -1,10 +1,11 @@
 import bcrypt from 'bcryptjs';
-import Assignment from '../models/Assignment.js';
 import FuelType from '../models/FuelType.js';
 import Nozzle from '../models/Nozzle.js';
 import PumpUnit from '../models/PumpUnit.js';
 import Tank from '../models/Tank.js';
+import UnitSession from '../models/UnitSession.js';
 import User from '../models/User.js';
+import NozzleReading from '../models/NozzleReading.js';
 import { refreshUnitNozzles } from './unitService.js';
 
 const defaultFuelTypes = [
@@ -28,14 +29,62 @@ const defaultUsers = [
     role: 'manager',
   },
   {
-    name: 'Default Pumper',
-    email: 'pumper@pump.local',
-    password: 'Pumper@123',
-    role: 'pumper',
+    name: 'Default Pump Operator',
+    email: 'pumpoperator@pump.local',
+    password: 'PumpOperator@123',
+    role: 'pumpOperator',
   },
 ];
 
 export const ensureSeedData = async () => {
+  await User.updateMany({ role: 'pumper' }, { $set: { role: 'pumpOperator' } });
+
+  const renamedSeedUser = await User.findOne({ email: 'pumpoperator@pump.local' });
+  const legacySeedUser = await User.findOne({ email: 'pumper@pump.local' });
+
+  if (legacySeedUser && !renamedSeedUser) {
+    legacySeedUser.name = 'Default Pump Operator';
+    legacySeedUser.email = 'pumpoperator@pump.local';
+    legacySeedUser.role = 'pumpOperator';
+    legacySeedUser.passwordHash = await bcrypt.hash('PumpOperator@123', 10);
+    await legacySeedUser.save();
+  } else if (renamedSeedUser) {
+    if (renamedSeedUser.role !== 'pumpOperator') {
+      renamedSeedUser.role = 'pumpOperator';
+    }
+
+    if (renamedSeedUser.name !== 'Default Pump Operator') {
+      renamedSeedUser.name = 'Default Pump Operator';
+    }
+
+    await renamedSeedUser.save();
+  }
+
+  await UnitSession.collection.updateMany(
+    {
+      pumper: { $exists: true },
+      pumpOperator: { $exists: false },
+    },
+    [
+      {
+        $set: {
+          pumpOperator: '$pumper',
+        },
+      },
+      {
+        $unset: 'pumper',
+      },
+    ]
+  );
+
+  try {
+    await UnitSession.collection.dropIndex('pumper_1_status_1');
+  } catch (_error) {
+    // Ignore when the legacy index is already missing.
+  }
+
+  await UnitSession.createIndexes();
+
   const fuelCount = await FuelType.countDocuments();
 
   if (fuelCount === 0) {
@@ -100,6 +149,44 @@ export const ensureSeedData = async () => {
 
   const units = await PumpUnit.find({ isActive: true });
   await Promise.all(units.map((unit) => refreshUnitNozzles(unit._id)));
+  await PumpUnit.updateMany(
+    {},
+    {
+      $set: {
+        status: 'available',
+        assignedTo: null,
+        activeSession: null,
+      },
+    }
+  );
+
+  const openSessions = await UnitSession.find({ status: 'open' });
+
+  for (const openSession of openSessions) {
+    await PumpUnit.updateOne(
+      { _id: openSession.unit },
+      {
+        $set: {
+          status: 'occupied',
+          assignedTo: openSession.pumpOperator,
+          activeSession: openSession._id,
+        },
+      }
+    );
+  }
+
+  const nozzles = await Nozzle.find({});
+
+  for (const nozzle of nozzles) {
+    const latestReading = await NozzleReading.findOne({ nozzle: nozzle._id }).sort({
+      timestamp: -1,
+      createdAt: -1,
+    });
+
+    nozzle.latestReading = latestReading?.closingReading ?? 0;
+    nozzle.latestReadingUpdatedAt = latestReading?.timestamp ?? null;
+    await nozzle.save();
+  }
 
   for (const userSeed of defaultUsers) {
     const existingUser = await User.findOne({ email: userSeed.email });
@@ -113,19 +200,5 @@ export const ensureSeedData = async () => {
         role: userSeed.role,
       });
     }
-  }
-
-  const defaultPumper = await User.findOne({ email: 'pumper@pump.local' });
-  const unitOne = await PumpUnit.findOne({ name: 'Unit 1', isActive: true });
-
-  if (defaultPumper && unitOne && !defaultPumper.assignedUnit) {
-    defaultPumper.assignedUnit = unitOne._id;
-    await defaultPumper.save();
-
-    await Assignment.create({
-      pumper: defaultPumper._id,
-      unit: unitOne._id,
-      assignedBy: defaultPumper._id,
-    });
   }
 };

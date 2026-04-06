@@ -14,6 +14,21 @@ const pumpUnitSchema = new mongoose.Schema(
         ref: 'Nozzle',
       },
     ],
+    status: {
+      type: String,
+      enum: ['available', 'occupied'],
+      default: 'available',
+    },
+    assignedTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    activeSession: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'UnitSession',
+      default: null,
+    },
     isActive: {
       type: Boolean,
       default: true,

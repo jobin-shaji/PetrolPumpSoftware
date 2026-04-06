@@ -1,7 +1,10 @@
 import Tank from '../models/Tank.js';
 
-export const increaseTankLevel = async (tankId, quantity) => {
-  const tank = await Tank.findOne({ _id: tankId, isActive: true }).populate('fuelType');
+const loadTank = (tankId, options = {}) =>
+  Tank.findOne({ _id: tankId, isActive: true }, null, options).populate('fuelType');
+
+export const increaseTankLevel = async (tankId, quantity, options = {}) => {
+  const tank = await loadTank(tankId, options);
 
   if (!tank) {
     const error = new Error('Tank not found');
@@ -20,12 +23,12 @@ export const increaseTankLevel = async (tankId, quantity) => {
   }
 
   tank.currentLevel = newLevel;
-  await tank.save();
+  await tank.save(options);
   return tank;
 };
 
-export const decreaseTankLevel = async (tankId, quantity) => {
-  const tank = await Tank.findOne({ _id: tankId, isActive: true }).populate('fuelType');
+export const decreaseTankLevel = async (tankId, quantity, options = {}) => {
+  const tank = await loadTank(tankId, options);
 
   if (!tank) {
     const error = new Error('Tank not found');
@@ -44,6 +47,6 @@ export const decreaseTankLevel = async (tankId, quantity) => {
   }
 
   tank.currentLevel = newLevel;
-  await tank.save();
+  await tank.save(options);
   return tank;
 };

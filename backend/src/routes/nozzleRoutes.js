@@ -9,7 +9,7 @@ import { authorize, protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-router.get('/', protect, authorize('admin', 'manager', 'pumper'), getNozzles);
+router.get('/', protect, authorize('admin', 'manager', 'pumpOperator'), getNozzles);
 router.post('/', protect, authorize('admin'), createNozzle);
 router.patch('/:id', protect, authorize('admin'), updateNozzle);
 router.delete('/:id', protect, authorize('admin'), deleteNozzle);

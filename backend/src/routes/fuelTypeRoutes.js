@@ -9,7 +9,7 @@ import { authorize, protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-router.get('/', protect, authorize('admin', 'manager', 'pumper'), getFuelTypes);
+router.get('/', protect, authorize('admin', 'manager', 'pumpOperator'), getFuelTypes);
 router.post('/', protect, authorize('admin'), createFuelType);
 router.patch('/:id', protect, authorize('admin'), updateFuelType);
 router.delete('/:id', protect, authorize('admin'), deleteFuelType);

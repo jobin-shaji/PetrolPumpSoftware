@@ -3,6 +3,30 @@ import PumpUnit from '../models/PumpUnit.js';
 
 const normalizeIds = (items = []) => [...new Set(items.map((item) => item.toString()))];
 
+const ensureUnitsAvailable = async (unitIds = []) => {
+  const normalizedIds = normalizeIds(unitIds.filter(Boolean));
+
+  if (!normalizedIds.length) {
+    return;
+  }
+
+  const occupiedUnits = await PumpUnit.find({
+    _id: { $in: normalizedIds },
+    isActive: true,
+    status: 'occupied',
+  }).select('name');
+
+  if (occupiedUnits.length) {
+    const error = new Error(
+      `Cannot modify nozzles while unit is occupied: ${occupiedUnits
+        .map((unit) => unit.name)
+        .join(', ')}`
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+};
+
 export const refreshUnitNozzles = async (unitId) => {
   if (!unitId) {
     return;
@@ -24,6 +48,8 @@ export const assignNozzlesToUnit = async (unitId, nozzleIds = []) => {
     throw error;
   }
 
+  await ensureUnitsAvailable([unitId]);
+
   if (normalizedIds.length) {
     const nozzles = await Nozzle.find({
       _id: { $in: normalizedIds },
@@ -39,6 +65,8 @@ export const assignNozzlesToUnit = async (unitId, nozzleIds = []) => {
     const previousUnitIds = normalizeIds(
       nozzles.filter((item) => item.unit).map((item) => item.unit)
     );
+
+    await ensureUnitsAvailable(previousUnitIds);
 
     await Nozzle.updateMany(
       {
@@ -69,6 +97,7 @@ export const assignNozzlesToUnit = async (unitId, nozzleIds = []) => {
 };
 
 export const clearUnitNozzles = async (unitId) => {
+  await ensureUnitsAvailable([unitId]);
   await Nozzle.updateMany({ unit: unitId }, { $set: { unit: null } });
   await refreshUnitNozzles(unitId);
 };

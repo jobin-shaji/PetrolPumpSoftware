@@ -1,6 +1,6 @@
 import PumpUnit from '../models/PumpUnit.js';
 import Shift from '../models/Shift.js';
-import User from '../models/User.js';
+import UnitSession from '../models/UnitSession.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { assignNozzlesToUnit, clearUnitNozzles } from '../services/unitService.js';
 
@@ -24,6 +24,7 @@ export const createUnit = asyncHandler(async (req, res) => {
   const unit = await PumpUnit.create({
     name,
     nozzles: [],
+    status: 'available',
   });
 
   await assignNozzlesToUnit(unit._id, nozzleIds);
@@ -34,7 +35,9 @@ export const createUnit = asyncHandler(async (req, res) => {
       path: 'tank',
       populate: { path: 'fuelType', select: 'name' },
     },
-  });
+  })
+    .populate('assignedTo', 'name email role')
+    .populate('activeSession', 'status startTime pumpOperator');
 
   res.status(201).json(populatedUnit);
 });
@@ -48,6 +51,11 @@ export const getUnits = asyncHandler(async (_req, res) => {
         populate: { path: 'fuelType', select: 'name description' },
       },
     })
+    .populate('assignedTo', 'name email role')
+    .populate({
+      path: 'activeSession',
+      populate: { path: 'pumpOperator', select: 'name email role' },
+    })
     .sort({ name: 1 });
 
   res.json(units);
@@ -59,6 +67,12 @@ export const updateUnit = asyncHandler(async (req, res) => {
   if (!unit) {
     const error = new Error('Unit not found');
     error.statusCode = 404;
+    throw error;
+  }
+
+  if (unit.status === 'occupied' && req.body.nozzleIds) {
+    const error = new Error('Cannot reconfigure nozzles while a unit session is active');
+    error.statusCode = 400;
     throw error;
   }
 
@@ -88,7 +102,12 @@ export const updateUnit = asyncHandler(async (req, res) => {
       path: 'tank',
       populate: { path: 'fuelType', select: 'name description' },
     },
-  });
+  })
+    .populate('assignedTo', 'name email role')
+    .populate({
+      path: 'activeSession',
+      populate: { path: 'pumpOperator', select: 'name email role' },
+    });
 
   res.json(updatedUnit);
 });
@@ -102,13 +121,13 @@ export const deleteUnit = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const [assignedUser, activeShift] = await Promise.all([
-    User.findOne({ assignedUnit: unit._id, isActive: true }),
+  const [openSession, activeShift] = await Promise.all([
+    UnitSession.findOne({ unit: unit._id, status: 'open' }),
     Shift.findOne({ unit: unit._id, status: 'active' }),
   ]);
 
-  if (assignedUser || activeShift) {
-    const error = new Error('Unit cannot be deleted while users or active shifts depend on it');
+  if (unit.status === 'occupied' || openSession || activeShift) {
+    const error = new Error('Unit cannot be deleted while an active session or shift exists');
     error.statusCode = 400;
     throw error;
   }

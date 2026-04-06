@@ -20,13 +20,8 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['admin', 'manager', 'pumper'],
+      enum: ['admin', 'manager', 'pumpOperator'],
       required: true,
-    },
-    assignedUnit: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'PumpUnit',
-      default: null,
     },
     isActive: {
       type: Boolean,
