@@ -1,0 +1,388 @@
+# Petrol Pump Management System (Dynamic MERN Application)
+
+## Project Overview
+
+Build a full-stack petrol pump management web application using the MERN stack (MongoDB, Express, React, Node.js).
+
+This is an internal system (no public homepage) used by employees.
+
+The system must be **fully dynamic and configurable**, meaning:
+
+* Fuel types, tanks, nozzles, and units are NOT hardcoded
+* Admin can create, edit, and delete system structure
+
+---
+
+## Authentication & Roles
+
+Use JWT authentication.
+
+Roles:
+
+* admin
+* manager
+* pumper
+
+Redirect after login:
+
+* /admin
+* /manager
+* /pumper
+
+---
+
+## System Design (Dynamic)
+
+### Entities must be configurable:
+
+* Fuel Types
+* Tanks
+* Nozzles
+* Pump Units
+
+---
+
+## Default Initial Setup (Seed Data)
+
+Fuel Types:
+
+* Motospot (Petrol)
+* High Speed Diesel
+* SP95
+* Green Diesel
+
+Tanks:
+
+* 4 tanks (one per fuel type)
+
+Nozzles:
+
+* 12 total:
+
+  * 4 Motospot
+  * 4 High Speed Diesel
+  * 2 SP95
+  * 2 Green Diesel
+
+Pump Units:
+
+* Unit 1 → 4 Motospot nozzles
+* Unit 2 → 4 High Speed Diesel nozzles
+* Unit 3 → remaining nozzles (SP95 + Green Diesel)
+
+NOTE:
+This is only default data. Admin must be able to modify everything.
+
+---
+
+## Admin Capabilities (FULL CONTROL)
+
+Admin can:
+
+* Create / update / delete users
+* Create / update / delete fuel types
+* Create / update / delete tanks
+* Create / update / delete nozzles
+* Create / update / delete pump units
+* Assign nozzles to units
+* Change fuel type of tanks
+* Modify system structure at any time
+
+IMPORTANT:
+System must not break when configuration changes.
+
+---
+
+## Core Features
+
+### 1. User Management (Admin)
+
+* Add employee
+* Remove employee
+* Assign roles
+
+---
+
+### 2. Pump Assignment (Manager)
+
+* Assign pumpers to units
+* Each pumper only sees their assigned unit
+
+---
+
+### 3. Shift Management
+
+* Start shift
+* End shift
+* All readings belong to a shift
+
+---
+
+### 4. Nozzle Reading Entry (Pumper)
+
+Inputs:
+
+* opening_reading
+* closing_reading
+* price_per_litre (manual)
+
+System calculates:
+
+* litres_sold = closing - opening
+* total_amount = litres_sold × price
+
+Validation:
+
+* closing > opening
+* price > 0
+
+---
+
+### 5. Tank Management
+
+Each tank:
+
+* fuel_type (reference)
+* capacity
+* current_level
+
+Formula:
+current_level = current_level + purchases - sales
+
+Constraints:
+
+* No overflow
+* No negative stock
+
+---
+
+### 6. Fuel Purchase (Manager)
+
+Inputs:
+
+* tank_id
+* quantity_litres
+* price_per_litre (manual)
+* total_cost (auto)
+* supplier (optional)
+* invoice_number (optional)
+
+Effects:
+
+* Increase tank level
+
+---
+
+### 7. Profit & Loss (Admin)
+
+Revenue:
+
+* Sum of sales
+
+Cost:
+
+* Sum of purchases
+
+Profit:
+
+* revenue - cost
+
+Provide:
+
+* Daily report
+* Fuel-wise report
+
+---
+
+## Database Design
+
+### User
+
+* name
+* email
+* password_hash
+* role
+* assigned_unit_id
+
+---
+
+### FuelType
+
+* name
+* description
+
+---
+
+### Tank
+
+* fuel_type_id
+* capacity
+* current_level
+
+---
+
+### Nozzle
+
+* tank_id
+* nozzle_number
+* unit_id
+
+---
+
+### PumpUnit
+
+* name (Unit 1, Unit 2, etc.)
+* nozzle_ids
+
+---
+
+### Shift
+
+* start_time
+* end_time
+* status
+
+---
+
+### NozzleReading
+
+* nozzle_id
+* shift_id
+* opening_reading
+* closing_reading
+* litres_sold
+* price_per_litre
+* total_amount
+* recorded_by
+* timestamp
+
+---
+
+### Purchase
+
+* tank_id
+* quantity_litres
+* price_per_litre
+* total_cost
+* supplier
+* invoice_number
+* date
+* entered_by
+
+---
+
+## API Endpoints
+
+Auth:
+POST /api/auth/login
+
+Users:
+POST /api/users
+GET /api/users
+DELETE /api/users/:id
+
+Fuel Types:
+POST /api/fuel-types
+GET /api/fuel-types
+PATCH /api/fuel-types/:id
+DELETE /api/fuel-types/:id
+
+Tanks:
+POST /api/tanks
+GET /api/tanks
+PATCH /api/tanks/:id
+DELETE /api/tanks/:id
+
+Nozzles:
+POST /api/nozzles
+GET /api/nozzles
+PATCH /api/nozzles/:id
+DELETE /api/nozzles/:id
+
+Units:
+POST /api/units
+GET /api/units
+PATCH /api/units/:id
+DELETE /api/units/:id
+
+Assignments:
+POST /api/assignments
+
+Readings:
+POST /api/readings
+GET /api/readings
+
+Purchases:
+POST /api/purchases
+GET /api/purchases
+
+Reports:
+GET /api/reports/profit
+GET /api/reports/daily
+GET /api/reports/fuel
+
+---
+
+## Frontend (React)
+
+Pages:
+
+Login:
+
+* No homepage
+
+Admin Dashboard:
+
+* Manage users
+* Manage system structure (fuel, tank, nozzle, unit)
+* View analytics
+
+Manager Dashboard:
+
+* Assign pumpers
+* Add purchases
+
+Pumper Dashboard:
+
+* Enter readings
+
+---
+
+## Important Rules
+
+* No global fuel price
+* Price must always be manually entered
+* Never delete financial records (use soft delete if needed)
+* All calculations must happen in backend
+* System must support future configuration changes
+
+---
+
+## Folder Structure
+
+Backend:
+
+* models
+* controllers
+* routes
+* middleware
+* services
+
+Frontend:
+
+* pages
+* components
+* services
+* context
+
+---
+
+## Deliverables
+
+* Full backend API
+* MongoDB schemas
+* React frontend
+* Role-based dashboards
+* Basic UI (functional, not fancy)
+
+---
