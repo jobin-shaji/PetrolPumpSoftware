@@ -3,9 +3,27 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { getRoleLabel } from '../utils/roles.js';
 
 const linksByRole = {
-  admin: [{ label: 'Admin', to: '/admin' }],
-  manager: [{ label: 'Manager', to: '/manager' }],
-  pumpOperator: [{ label: 'Pump Operator', to: '/pump-operator' }],
+  admin: [
+    { label: 'Dashboard', to: '/dashboard' },
+    { label: 'Users', to: '/dashboard/users' },
+    { label: 'Fuel Types', to: '/dashboard/config/fuel-types' },
+    { label: 'Tanks', to: '/dashboard/config/tanks' },
+    { label: 'Nozzles', to: '/dashboard/config/nozzles' },
+    { label: 'Units', to: '/dashboard/config/units' },
+    { label: 'Sessions', to: '/dashboard/sessions' },
+    { label: 'Analytics', to: '/dashboard/analytics' },
+  ],
+  manager: [
+    { label: 'Dashboard', to: '/dashboard' },
+    { label: 'Units', to: '/dashboard/units' },
+    { label: 'Purchases', to: '/dashboard/purchases' },
+    { label: 'Analytics', to: '/dashboard/analytics' },
+  ],
+  pumpOperator: [
+    { label: 'Dashboard', to: '/dashboard' },
+    { label: 'Session', to: '/dashboard/session' },
+    { label: 'Readings', to: '/dashboard/readings' },
+  ],
 };
 
 const Layout = ({ title, subtitle, children }) => {
@@ -37,7 +55,11 @@ const Layout = ({ title, subtitle, children }) => {
           <Link
             key={link.to}
             to={link.to}
-            className={location.pathname === link.to ? 'nav-link active' : 'nav-link'}
+            className={
+              location.pathname === link.to || location.pathname.startsWith(`${link.to}/`)
+                ? 'nav-link active'
+                : 'nav-link'
+            }
           >
             {link.label}
           </Link>

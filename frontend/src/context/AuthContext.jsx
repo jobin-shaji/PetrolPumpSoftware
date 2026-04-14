@@ -4,9 +4,9 @@ import api, { TOKEN_STORAGE_KEY } from '../services/api.js';
 const AuthContext = createContext(null);
 
 const dashboardMap = {
-  admin: '/admin',
-  manager: '/manager',
-  pumpOperator: '/pump-operator',
+  admin: '/dashboard',
+  manager: '/dashboard',
+  pumpOperator: '/dashboard',
 };
 
 export const AuthProvider = ({ children }) => {
