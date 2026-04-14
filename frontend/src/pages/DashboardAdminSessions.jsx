@@ -5,8 +5,18 @@ import Layout from '../components/Layout.jsx';
 import SectionCard from '../components/SectionCard.jsx';
 import api from '../services/api.js';
 
-const formatDateTime = (value) =>
-  value ? new Date(value).toLocaleString('en-IN', { hour12: true }) : '-';
+const formatDateTime = (value) => {
+  if (!value) {
+    return '-';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return date.toLocaleString('en-IN', { hour12: true });
+};
 
 const buildForceCloseRows = (session) =>
   (session?.openingReadings || []).map((item) => ({
@@ -52,7 +62,7 @@ const DashboardAdminSessions = () => {
   }, []);
 
   const occupiedUnits = useMemo(
-    () => data.units.filter((unit) => unit.status === 'occupied'),
+    () => data.units.filter((unit) => unit.status === 'occupied' || unit.activeSession),
     [data.units]
   );
 
@@ -246,4 +256,3 @@ const DashboardAdminSessions = () => {
 };
 
 export default DashboardAdminSessions;
-

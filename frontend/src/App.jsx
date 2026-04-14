@@ -3,11 +3,8 @@ import ProtectedRoute from './components/ProtectedRoute.jsx';
 import { useAuth } from './context/AuthContext.jsx';
 import DashboardHome from './pages/DashboardHome.jsx';
 import DashboardAnalytics from './pages/DashboardAnalytics.jsx';
-import DashboardAdminFuelTypes from './pages/DashboardAdminFuelTypes.jsx';
-import DashboardAdminNozzles from './pages/DashboardAdminNozzles.jsx';
 import DashboardAdminSessions from './pages/DashboardAdminSessions.jsx';
-import DashboardAdminTanks from './pages/DashboardAdminTanks.jsx';
-import DashboardAdminUnits from './pages/DashboardAdminUnits.jsx';
+import DashboardAdminSetup from './pages/DashboardAdminSetup.jsx';
 import DashboardAdminUsers from './pages/DashboardAdminUsers.jsx';
 import DashboardManagerPurchases from './pages/DashboardManagerPurchases.jsx';
 import DashboardManagerUnits from './pages/DashboardManagerUnits.jsx';
@@ -55,37 +52,18 @@ const App = () => (
       }
     />
     <Route
-      path="/dashboard/config/fuel-types"
+      path="/dashboard/setup"
       element={
         <ProtectedRoute allowedRoles={['admin']}>
-          <DashboardAdminFuelTypes />
+          <DashboardAdminSetup />
         </ProtectedRoute>
       }
     />
-    <Route
-      path="/dashboard/config/tanks"
-      element={
-        <ProtectedRoute allowedRoles={['admin']}>
-          <DashboardAdminTanks />
-        </ProtectedRoute>
-      }
-    />
-    <Route
-      path="/dashboard/config/nozzles"
-      element={
-        <ProtectedRoute allowedRoles={['admin']}>
-          <DashboardAdminNozzles />
-        </ProtectedRoute>
-      }
-    />
-    <Route
-      path="/dashboard/config/units"
-      element={
-        <ProtectedRoute allowedRoles={['admin']}>
-          <DashboardAdminUnits />
-        </ProtectedRoute>
-      }
-    />
+
+    <Route path="/dashboard/config/fuel-types" element={<Navigate to="/dashboard/setup" replace />} />
+    <Route path="/dashboard/config/tanks" element={<Navigate to="/dashboard/setup" replace />} />
+    <Route path="/dashboard/config/nozzles" element={<Navigate to="/dashboard/setup" replace />} />
+    <Route path="/dashboard/config/units" element={<Navigate to="/dashboard/setup" replace />} />
     <Route
       path="/dashboard/sessions"
       element={

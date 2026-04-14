@@ -368,7 +368,7 @@ export const listUnits = async (db, { activeOnly = true, ids = null } = {}) => {
       SELECT
         u.id,
         u.name,
-        u.status,
+        CASE WHEN us.id IS NULL THEN 'available' ELSE 'occupied' END AS status,
         u.is_active AS "isActive",
         u.created_at AS "createdAt",
         u.updated_at AS "updatedAt",

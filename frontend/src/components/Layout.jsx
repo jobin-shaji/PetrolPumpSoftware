@@ -6,10 +6,7 @@ const linksByRole = {
   admin: [
     { label: 'Dashboard', to: '/dashboard' },
     { label: 'Users', to: '/dashboard/users' },
-    { label: 'Fuel Types', to: '/dashboard/config/fuel-types' },
-    { label: 'Tanks', to: '/dashboard/config/tanks' },
-    { label: 'Nozzles', to: '/dashboard/config/nozzles' },
-    { label: 'Units', to: '/dashboard/config/units' },
+    { label: 'Setup', to: '/dashboard/setup' },
     { label: 'Sessions', to: '/dashboard/sessions' },
     { label: 'Analytics', to: '/dashboard/analytics' },
   ],
