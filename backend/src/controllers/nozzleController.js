@@ -1,29 +1,45 @@
-import Nozzle from '../models/Nozzle.js';
-import NozzleReading from '../models/NozzleReading.js';
-import PumpUnit from '../models/PumpUnit.js';
-import Tank from '../models/Tank.js';
+import { getDb } from '../config/db.js';
+import { handleUniqueViolation } from '../db/helpers.js';
+import { getNozzleById, listNozzles } from '../services/dataService.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { refreshUnitNozzles } from '../services/unitService.js';
 
 const validateReferences = async (tankId, unitId) => {
-  const tank = await Tank.findOne({ _id: tankId, isActive: true });
+  const db = getDb();
+  const { rowCount: tankCount } = await db.query(
+    `
+      SELECT 1
+      FROM tanks
+      WHERE id = $1 AND is_active = TRUE
+      LIMIT 1
+    `,
+    [tankId]
+  );
 
-  if (!tank) {
+  if (tankCount === 0) {
     const error = new Error('Selected tank is invalid');
     error.statusCode = 400;
     throw error;
   }
 
   if (unitId) {
-    const unit = await PumpUnit.findOne({ _id: unitId, isActive: true });
+    const { rows: unitRows } = await db.query(
+      `
+        SELECT status
+        FROM pump_units
+        WHERE id = $1 AND is_active = TRUE
+        LIMIT 1
+      `,
+      [unitId]
+    );
 
-    if (!unit) {
+    if (!unitRows[0]) {
       const error = new Error('Selected unit is invalid');
       error.statusCode = 400;
       throw error;
     }
 
-    if (unit.status === 'occupied') {
+    if (unitRows[0].status === 'occupied') {
       const error = new Error('Cannot assign a nozzle to an occupied unit');
       error.statusCode = 400;
       throw error;
@@ -42,48 +58,41 @@ export const createNozzle = asyncHandler(async (req, res) => {
 
   await validateReferences(tank, unit);
 
-  const existingNozzle = await Nozzle.findOne({ nozzleNumber: nozzleNumber.trim() });
+  const db = getDb();
+  let nozzleId;
 
-  if (existingNozzle) {
-    const error = new Error('Nozzle number already exists');
-    error.statusCode = 400;
-    throw error;
+  try {
+    const { rows } = await db.query(
+      `
+        INSERT INTO nozzles (tank_id, nozzle_number, unit_id)
+        VALUES ($1, $2, $3)
+        RETURNING id
+      `,
+      [tank, nozzleNumber.trim(), unit || null]
+    );
+
+    nozzleId = rows[0]?.id;
+  } catch (error) {
+    handleUniqueViolation(error, 'Nozzle number already exists');
   }
-
-  const nozzle = await Nozzle.create({
-    tank,
-    nozzleNumber,
-    unit: unit || null,
-  });
 
   if (unit) {
     await refreshUnitNozzles(unit);
   }
 
-  const populatedNozzle = await Nozzle.findById(nozzle._id)
-    .populate({
-      path: 'tank',
-      populate: { path: 'fuelType', select: 'name' },
-    })
-    .populate('unit', 'name');
-
-  res.status(201).json(populatedNozzle);
+  const nozzle = await getNozzleById(db, nozzleId);
+  res.status(201).json(nozzle);
 });
 
 export const getNozzles = asyncHandler(async (_req, res) => {
-  const nozzles = await Nozzle.find({ isActive: true })
-    .populate({
-      path: 'tank',
-      populate: { path: 'fuelType', select: 'name description' },
-    })
-    .populate('unit', 'name')
-    .sort({ nozzleNumber: 1 });
-
+  const db = getDb();
+  const nozzles = await listNozzles(db, { activeOnly: true });
   res.json(nozzles);
 });
 
 export const updateNozzle = asyncHandler(async (req, res) => {
-  const nozzle = await Nozzle.findOne({ _id: req.params.id, isActive: true });
+  const db = getDb();
+  const nozzle = await getNozzleById(db, req.params.id);
 
   if (!nozzle) {
     const error = new Error('Nozzle not found');
@@ -91,59 +100,62 @@ export const updateNozzle = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const nextTank = req.body.tank || nozzle.tank;
-  const nextUnit = req.body.unit !== undefined ? req.body.unit : nozzle.unit;
+  const nextTank = req.body.tank || nozzle.tank?._id || nozzle.tank;
+  const nextUnit =
+    req.body.unit !== undefined ? req.body.unit : nozzle.unit?._id || nozzle.unit;
   await validateReferences(nextTank, nextUnit);
 
   if (req.body.nozzleNumber && req.body.nozzleNumber !== nozzle.nozzleNumber) {
-    const existingNozzle = await Nozzle.findOne({
-      nozzleNumber: req.body.nozzleNumber.trim(),
-      _id: { $ne: nozzle._id },
-    });
-
-    if (existingNozzle) {
-      const error = new Error('Another nozzle already uses that number');
-      error.statusCode = 400;
-      throw error;
-    }
+    // uniqueness enforced in DB; map unique violation below
   }
 
-  const previousUnitId = nozzle.unit?.toString() || null;
+  const previousUnitId = nozzle.unit?._id || nozzle.unit || null;
 
   if (previousUnitId && previousUnitId !== nextUnit?.toString()) {
-    const previousUnit = await PumpUnit.findOne({ _id: previousUnitId, isActive: true });
+    const { rows: previousUnitRows } = await db.query(
+      `
+        SELECT status
+        FROM pump_units
+        WHERE id = $1 AND is_active = TRUE
+        LIMIT 1
+      `,
+      [previousUnitId]
+    );
 
-    if (previousUnit?.status === 'occupied') {
+    if (previousUnitRows[0]?.status === 'occupied') {
       const error = new Error('Cannot move a nozzle out of an occupied unit');
       error.statusCode = 400;
       throw error;
     }
   }
 
-  nozzle.tank = nextTank;
-  nozzle.unit = nextUnit || null;
-
-  if (req.body.nozzleNumber) {
-    nozzle.nozzleNumber = req.body.nozzleNumber;
+  try {
+    await db.query(
+      `
+        UPDATE nozzles
+        SET
+          tank_id = $2,
+          unit_id = $3,
+          nozzle_number = COALESCE($4, nozzle_number),
+          updated_at = NOW()
+        WHERE id = $1 AND is_active = TRUE
+      `,
+      [req.params.id, nextTank, nextUnit || null, req.body.nozzleNumber?.trim() || null]
+    );
+  } catch (error) {
+    handleUniqueViolation(error, 'Another nozzle already uses that number');
   }
 
-  await nozzle.save();
-
-  const unitIds = [previousUnitId, nozzle.unit?.toString()].filter(Boolean);
+  const unitIds = [previousUnitId, nextUnit].filter(Boolean);
   await Promise.all([...new Set(unitIds)].map((item) => refreshUnitNozzles(item)));
 
-  const updatedNozzle = await Nozzle.findById(nozzle._id)
-    .populate({
-      path: 'tank',
-      populate: { path: 'fuelType', select: 'name description' },
-    })
-    .populate('unit', 'name');
-
+  const updatedNozzle = await getNozzleById(db, req.params.id);
   res.json(updatedNozzle);
 });
 
 export const deleteNozzle = asyncHandler(async (req, res) => {
-  const nozzle = await Nozzle.findOne({ _id: req.params.id, isActive: true });
+  const db = getDb();
+  const nozzle = await getNozzleById(db, req.params.id);
 
   if (!nozzle) {
     const error = new Error('Nozzle not found');
@@ -151,29 +163,51 @@ export const deleteNozzle = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const reading = await NozzleReading.findOne({ nozzle: nozzle._id });
+  const { rowCount: readingCount } = await db.query(
+    `
+      SELECT 1
+      FROM unit_session_nozzle_readings
+      WHERE nozzle_id = $1
+        AND closing_reading IS NOT NULL
+      LIMIT 1
+    `,
+    [req.params.id]
+  );
 
-  if (reading) {
+  if (readingCount > 0) {
     const error = new Error('Nozzle cannot be deleted because financial readings exist');
     error.statusCode = 400;
     throw error;
   }
 
-  const previousUnitId = nozzle.unit?.toString() || null;
+  const previousUnitId = nozzle.unit?._id || nozzle.unit || null;
 
   if (previousUnitId) {
-    const previousUnit = await PumpUnit.findOne({ _id: previousUnitId, isActive: true });
+    const { rows: previousUnitRows } = await db.query(
+      `
+        SELECT status
+        FROM pump_units
+        WHERE id = $1 AND is_active = TRUE
+        LIMIT 1
+      `,
+      [previousUnitId]
+    );
 
-    if (previousUnit?.status === 'occupied') {
+    if (previousUnitRows[0]?.status === 'occupied') {
       const error = new Error('Cannot delete a nozzle from an occupied unit');
       error.statusCode = 400;
       throw error;
     }
   }
 
-  nozzle.isActive = false;
-  nozzle.unit = null;
-  await nozzle.save();
+  await db.query(
+    `
+      UPDATE nozzles
+      SET is_active = FALSE, unit_id = NULL, updated_at = NOW()
+      WHERE id = $1
+    `,
+    [req.params.id]
+  );
 
   if (previousUnitId) {
     await refreshUnitNozzles(previousUnitId);

@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
+import { getDb } from '../config/db.js';
+import { getUserRowById, mapUserRecord } from '../services/dataService.js';
 
 export const protect = async (req, _res, next) => {
   try {
@@ -13,7 +14,10 @@ export const protect = async (req, _res, next) => {
 
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findOne({ _id: decoded.id, isActive: true });
+
+    const db = getDb();
+    const userRow = await getUserRowById(db, decoded.id);
+    const user = mapUserRecord(userRow);
 
     if (!user) {
       const error = new Error('User not found or inactive');

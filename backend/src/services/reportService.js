@@ -1,5 +1,5 @@
-import Purchase from '../models/Purchase.js';
-import NozzleReading from '../models/NozzleReading.js';
+import { getDb } from '../config/db.js';
+import { normalizeNumeric } from '../db/helpers.js';
 
 export const parseDateRange = (query) => {
   const { date, startDate, endDate } = query;
@@ -20,108 +20,104 @@ export const parseDateRange = (query) => {
 export const getProfitSummary = async (query) => {
   const { start, end } = parseDateRange(query);
 
-  const [sales, purchases] = await Promise.all([
-    NozzleReading.aggregate([
-      {
-        $match: {
-          timestamp: { $gte: start, $lte: end },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          revenue: { $sum: '$totalAmount' },
-          litresSold: { $sum: '$litresSold' },
-        },
-      },
-    ]),
-    Purchase.aggregate([
-      {
-        $match: {
-          isDeleted: false,
-          date: { $gte: start, $lte: end },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          cost: { $sum: '$totalCost' },
-          litresPurchased: { $sum: '$quantityLitres' },
-        },
-      },
-    ]),
+  const db = getDb();
+
+  const [{ rows: salesRows }, { rows: purchaseRows }] = await Promise.all([
+    db.query(
+      `
+        SELECT
+          COALESCE(SUM(r.total_amount), 0) AS revenue,
+          COALESCE(SUM(r.litres_sold), 0) AS "litresSold"
+        FROM unit_session_nozzle_readings r
+        WHERE r.closed_at >= $1
+          AND r.closed_at <= $2
+          AND r.closing_reading IS NOT NULL
+      `,
+      [start, end]
+    ),
+    db.query(
+      `
+        SELECT
+          COALESCE(SUM(p.total_cost), 0) AS cost,
+          COALESCE(SUM(p.quantity_litres), 0) AS "litresPurchased"
+        FROM purchases p
+        WHERE p.is_deleted = FALSE
+          AND p.date >= $1
+          AND p.date <= $2
+      `,
+      [start, end]
+    ),
   ]);
 
-  const revenue = sales[0]?.revenue || 0;
-  const cost = purchases[0]?.cost || 0;
+  const revenue = normalizeNumeric(salesRows[0]?.revenue) || 0;
+  const cost = normalizeNumeric(purchaseRows[0]?.cost) || 0;
+  const litresSold = normalizeNumeric(salesRows[0]?.litresSold) || 0;
+  const litresPurchased = normalizeNumeric(purchaseRows[0]?.litresPurchased) || 0;
 
   return {
     range: { start, end },
     revenue,
     cost,
     profit: revenue - cost,
-    litresSold: sales[0]?.litresSold || 0,
-    litresPurchased: purchases[0]?.litresPurchased || 0,
+    litresSold,
+    litresPurchased,
   };
 };
 
 export const getDailyReport = async (query) => {
   const { start, end } = parseDateRange(query);
 
-  const [sales, purchases] = await Promise.all([
-    NozzleReading.aggregate([
-      {
-        $match: {
-          timestamp: { $gte: start, $lte: end },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            $dateToString: { format: '%Y-%m-%d', date: '$timestamp' },
-          },
-          revenue: { $sum: '$totalAmount' },
-          litresSold: { $sum: '$litresSold' },
-        },
-      },
-      { $sort: { _id: 1 } },
-    ]),
-    Purchase.aggregate([
-      {
-        $match: {
-          isDeleted: false,
-          date: { $gte: start, $lte: end },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            $dateToString: { format: '%Y-%m-%d', date: '$date' },
-          },
-          cost: { $sum: '$totalCost' },
-          litresPurchased: { $sum: '$quantityLitres' },
-        },
-      },
-      { $sort: { _id: 1 } },
-    ]),
+  const db = getDb();
+
+  const [{ rows: salesRows }, { rows: purchaseRows }] = await Promise.all([
+    db.query(
+      `
+        SELECT
+          TO_CHAR(r.closed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
+          COALESCE(SUM(r.total_amount), 0) AS revenue,
+          COALESCE(SUM(r.litres_sold), 0) AS "litresSold"
+        FROM unit_session_nozzle_readings r
+        WHERE r.closed_at >= $1
+          AND r.closed_at <= $2
+          AND r.closing_reading IS NOT NULL
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `,
+      [start, end]
+    ),
+    db.query(
+      `
+        SELECT
+          TO_CHAR(p.date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
+          COALESCE(SUM(p.total_cost), 0) AS cost,
+          COALESCE(SUM(p.quantity_litres), 0) AS "litresPurchased"
+        FROM purchases p
+        WHERE p.is_deleted = FALSE
+          AND p.date >= $1
+          AND p.date <= $2
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `,
+      [start, end]
+    ),
   ]);
 
   const dailyMap = new Map();
 
-  sales.forEach((entry) => {
-    dailyMap.set(entry._id, {
-      date: entry._id,
-      revenue: entry.revenue,
+  salesRows.forEach((row) => {
+    dailyMap.set(row.date, {
+      date: row.date,
+      revenue: normalizeNumeric(row.revenue) || 0,
       cost: 0,
-      profit: entry.revenue,
-      litresSold: entry.litresSold,
+      profit: normalizeNumeric(row.revenue) || 0,
+      litresSold: normalizeNumeric(row.litresSold) || 0,
       litresPurchased: 0,
     });
   });
 
-  purchases.forEach((entry) => {
-    const existing = dailyMap.get(entry._id) || {
-      date: entry._id,
+  purchaseRows.forEach((row) => {
+    const existing = dailyMap.get(row.date) || {
+      date: row.date,
       revenue: 0,
       cost: 0,
       profit: 0,
@@ -129,10 +125,10 @@ export const getDailyReport = async (query) => {
       litresPurchased: 0,
     };
 
-    existing.cost = entry.cost;
-    existing.litresPurchased = entry.litresPurchased;
+    existing.cost = normalizeNumeric(row.cost) || 0;
+    existing.litresPurchased = normalizeNumeric(row.litresPurchased) || 0;
     existing.profit = existing.revenue - existing.cost;
-    dailyMap.set(entry._id, existing);
+    dailyMap.set(row.date, existing);
   });
 
   return Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
@@ -141,101 +137,63 @@ export const getDailyReport = async (query) => {
 export const getFuelWiseReport = async (query) => {
   const { start, end } = parseDateRange(query);
 
-  const [sales, purchases] = await Promise.all([
-    NozzleReading.aggregate([
-      {
-        $match: {
-          timestamp: { $gte: start, $lte: end },
-        },
-      },
-      {
-        $lookup: {
-          from: 'nozzles',
-          localField: 'nozzle',
-          foreignField: '_id',
-          as: 'nozzle',
-        },
-      },
-      { $unwind: '$nozzle' },
-      {
-        $lookup: {
-          from: 'tanks',
-          localField: 'nozzle.tank',
-          foreignField: '_id',
-          as: 'tank',
-        },
-      },
-      { $unwind: '$tank' },
-      {
-        $lookup: {
-          from: 'fueltypes',
-          localField: 'tank.fuelType',
-          foreignField: '_id',
-          as: 'fuelType',
-        },
-      },
-      { $unwind: '$fuelType' },
-      {
-        $group: {
-          _id: '$fuelType.name',
-          revenue: { $sum: '$totalAmount' },
-          litresSold: { $sum: '$litresSold' },
-        },
-      },
-      { $sort: { _id: 1 } },
-    ]),
-    Purchase.aggregate([
-      {
-        $match: {
-          isDeleted: false,
-          date: { $gte: start, $lte: end },
-        },
-      },
-      {
-        $lookup: {
-          from: 'tanks',
-          localField: 'tank',
-          foreignField: '_id',
-          as: 'tank',
-        },
-      },
-      { $unwind: '$tank' },
-      {
-        $lookup: {
-          from: 'fueltypes',
-          localField: 'tank.fuelType',
-          foreignField: '_id',
-          as: 'fuelType',
-        },
-      },
-      { $unwind: '$fuelType' },
-      {
-        $group: {
-          _id: '$fuelType.name',
-          cost: { $sum: '$totalCost' },
-          litresPurchased: { $sum: '$quantityLitres' },
-        },
-      },
-      { $sort: { _id: 1 } },
-    ]),
+  const db = getDb();
+
+  const [{ rows: salesRows }, { rows: purchaseRows }] = await Promise.all([
+    db.query(
+      `
+        SELECT
+          ft.name AS "fuelType",
+          COALESCE(SUM(r.total_amount), 0) AS revenue,
+          COALESCE(SUM(r.litres_sold), 0) AS "litresSold"
+        FROM unit_session_nozzle_readings r
+        JOIN nozzles n ON n.id = r.nozzle_id
+        JOIN tanks t ON t.id = n.tank_id
+        JOIN fuel_types ft ON ft.id = t.fuel_type_id
+        WHERE r.closed_at >= $1
+          AND r.closed_at <= $2
+          AND r.closing_reading IS NOT NULL
+        GROUP BY ft.name
+        ORDER BY ft.name ASC
+      `,
+      [start, end]
+    ),
+    db.query(
+      `
+        SELECT
+          ft.name AS "fuelType",
+          COALESCE(SUM(p.total_cost), 0) AS cost,
+          COALESCE(SUM(p.quantity_litres), 0) AS "litresPurchased"
+        FROM purchases p
+        JOIN tanks t ON t.id = p.tank_id
+        JOIN fuel_types ft ON ft.id = t.fuel_type_id
+        WHERE p.is_deleted = FALSE
+          AND p.date >= $1
+          AND p.date <= $2
+        GROUP BY ft.name
+        ORDER BY ft.name ASC
+      `,
+      [start, end]
+    ),
   ]);
 
   const fuelMap = new Map();
 
-  sales.forEach((entry) => {
-    fuelMap.set(entry._id, {
-      fuelType: entry._id,
-      revenue: entry.revenue,
+  salesRows.forEach((row) => {
+    const revenue = normalizeNumeric(row.revenue) || 0;
+    fuelMap.set(row.fuelType, {
+      fuelType: row.fuelType,
+      revenue,
       cost: 0,
-      profit: entry.revenue,
-      litresSold: entry.litresSold,
+      profit: revenue,
+      litresSold: normalizeNumeric(row.litresSold) || 0,
       litresPurchased: 0,
     });
   });
 
-  purchases.forEach((entry) => {
-    const existing = fuelMap.get(entry._id) || {
-      fuelType: entry._id,
+  purchaseRows.forEach((row) => {
+    const existing = fuelMap.get(row.fuelType) || {
+      fuelType: row.fuelType,
       revenue: 0,
       cost: 0,
       profit: 0,
@@ -243,13 +201,11 @@ export const getFuelWiseReport = async (query) => {
       litresPurchased: 0,
     };
 
-    existing.cost = entry.cost;
-    existing.litresPurchased = entry.litresPurchased;
+    existing.cost = normalizeNumeric(row.cost) || 0;
+    existing.litresPurchased = normalizeNumeric(row.litresPurchased) || 0;
     existing.profit = existing.revenue - existing.cost;
-    fuelMap.set(entry._id, existing);
+    fuelMap.set(row.fuelType, existing);
   });
 
-  return Array.from(fuelMap.values()).sort((a, b) =>
-    a.fuelType.localeCompare(b.fuelType)
-  );
+  return Array.from(fuelMap.values()).sort((a, b) => a.fuelType.localeCompare(b.fuelType));
 };

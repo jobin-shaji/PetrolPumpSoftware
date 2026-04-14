@@ -1,12 +1,11 @@
-import FuelType from '../models/FuelType.js';
-import Nozzle from '../models/Nozzle.js';
-import Purchase from '../models/Purchase.js';
-import Tank from '../models/Tank.js';
+import { getDb } from '../config/db.js';
+import { getFuelTypeById, getTankById, listTanks } from '../services/dataService.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 const validateTankPayload = async ({ fuelType, capacity, currentLevel }) => {
   if (fuelType) {
-    const existingFuelType = await FuelType.findOne({ _id: fuelType, isActive: true });
+    const db = getDb();
+    const existingFuelType = await getFuelTypeById(db, fuelType);
 
     if (!existingFuelType) {
       const error = new Error('Selected fuel type is invalid');
@@ -49,26 +48,29 @@ export const createTank = asyncHandler(async (req, res) => {
 
   await validateTankPayload({ fuelType, capacity, currentLevel });
 
-  const tank = await Tank.create({
-    fuelType,
-    capacity,
-    currentLevel,
-  });
+  const db = getDb();
+  const { rows } = await db.query(
+    `
+      INSERT INTO tanks (fuel_type_id, capacity, current_level)
+      VALUES ($1, $2, $3)
+      RETURNING id
+    `,
+    [fuelType, Number(capacity), Number(currentLevel)]
+  );
 
-  const populatedTank = await Tank.findById(tank._id).populate('fuelType', 'name description');
-  res.status(201).json(populatedTank);
+  const tank = await getTankById(db, rows[0]?.id);
+  res.status(201).json(tank);
 });
 
 export const getTanks = asyncHandler(async (_req, res) => {
-  const tanks = await Tank.find({ isActive: true })
-    .populate('fuelType', 'name description')
-    .sort({ createdAt: -1 });
-
+  const db = getDb();
+  const tanks = await listTanks(db, { activeOnly: true });
   res.json(tanks);
 });
 
 export const updateTank = asyncHandler(async (req, res) => {
-  const tank = await Tank.findOne({ _id: req.params.id, isActive: true });
+  const db = getDb();
+  const tank = await getTankById(db, req.params.id);
 
   if (!tank) {
     const error = new Error('Tank not found');
@@ -88,17 +90,26 @@ export const updateTank = asyncHandler(async (req, res) => {
     currentLevel: nextCurrentLevel,
   });
 
-  tank.fuelType = nextFuelType;
-  tank.capacity = nextCapacity;
-  tank.currentLevel = nextCurrentLevel;
-  await tank.save();
+  await db.query(
+    `
+      UPDATE tanks
+      SET
+        fuel_type_id = $2,
+        capacity = $3,
+        current_level = $4,
+        updated_at = NOW()
+      WHERE id = $1 AND is_active = TRUE
+    `,
+    [req.params.id, nextFuelType._id || nextFuelType, nextCapacity, nextCurrentLevel]
+  );
 
-  const updatedTank = await Tank.findById(tank._id).populate('fuelType', 'name description');
+  const updatedTank = await getTankById(db, req.params.id);
   res.json(updatedTank);
 });
 
 export const deleteTank = asyncHandler(async (req, res) => {
-  const tank = await Tank.findOne({ _id: req.params.id, isActive: true });
+  const db = getDb();
+  const tank = await getTankById(db, req.params.id);
 
   if (!tank) {
     const error = new Error('Tank not found');
@@ -106,18 +117,40 @@ export const deleteTank = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const [linkedNozzle, linkedPurchase] = await Promise.all([
-    Nozzle.findOne({ tank: tank._id, isActive: true }),
-    Purchase.findOne({ tank: tank._id, isDeleted: false }),
+  const [{ rowCount: nozzleCount }, { rowCount: purchaseCount }] = await Promise.all([
+    db.query(
+      `
+        SELECT 1
+        FROM nozzles
+        WHERE tank_id = $1 AND is_active = TRUE
+        LIMIT 1
+      `,
+      [req.params.id]
+    ),
+    db.query(
+      `
+        SELECT 1
+        FROM purchases
+        WHERE tank_id = $1 AND is_deleted = FALSE
+        LIMIT 1
+      `,
+      [req.params.id]
+    ),
   ]);
 
-  if (linkedNozzle || linkedPurchase) {
+  if (nozzleCount > 0 || purchaseCount > 0) {
     const error = new Error('Tank cannot be deleted while linked to nozzles or purchases');
     error.statusCode = 400;
     throw error;
   }
 
-  tank.isActive = false;
-  await tank.save();
+  await db.query(
+    `
+      UPDATE tanks
+      SET is_active = FALSE, updated_at = NOW()
+      WHERE id = $1
+    `,
+    [req.params.id]
+  );
   res.json({ message: 'Tank deleted successfully' });
 });

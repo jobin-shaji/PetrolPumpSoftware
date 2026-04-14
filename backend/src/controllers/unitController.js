@@ -1,6 +1,5 @@
-import PumpUnit from '../models/PumpUnit.js';
-import Shift from '../models/Shift.js';
-import UnitSession from '../models/UnitSession.js';
+import { getDb } from '../config/db.js';
+import { getUnitById, listUnits } from '../services/dataService.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { assignNozzlesToUnit, clearUnitNozzles } from '../services/unitService.js';
 
@@ -13,56 +12,44 @@ export const createUnit = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const existingUnit = await PumpUnit.findOne({ name: name.trim() });
+  const db = getDb();
+  let unitId;
 
-  if (existingUnit) {
-    const error = new Error('Unit name already exists');
-    error.statusCode = 400;
+  try {
+    const { rows } = await db.query(
+      `
+        INSERT INTO pump_units (name, status)
+        VALUES ($1, 'available')
+        RETURNING id
+      `,
+      [name.trim()]
+    );
+    unitId = rows[0]?.id;
+  } catch (error) {
+    if (error?.code === '23505') {
+      const err = new Error('Unit name already exists');
+      err.statusCode = 400;
+      throw err;
+    }
+
     throw error;
   }
 
-  const unit = await PumpUnit.create({
-    name,
-    nozzles: [],
-    status: 'available',
-  });
+  await assignNozzlesToUnit(unitId, nozzleIds);
 
-  await assignNozzlesToUnit(unit._id, nozzleIds);
-
-  const populatedUnit = await PumpUnit.findById(unit._id).populate({
-    path: 'nozzles',
-    populate: {
-      path: 'tank',
-      populate: { path: 'fuelType', select: 'name' },
-    },
-  })
-    .populate('assignedTo', 'name email role')
-    .populate('activeSession', 'status startTime pumpOperator');
-
-  res.status(201).json(populatedUnit);
+  const unit = await getUnitById(db, unitId);
+  res.status(201).json(unit);
 });
 
 export const getUnits = asyncHandler(async (_req, res) => {
-  const units = await PumpUnit.find({ isActive: true })
-    .populate({
-      path: 'nozzles',
-      populate: {
-        path: 'tank',
-        populate: { path: 'fuelType', select: 'name description' },
-      },
-    })
-    .populate('assignedTo', 'name email role')
-    .populate({
-      path: 'activeSession',
-      populate: { path: 'pumpOperator', select: 'name email role' },
-    })
-    .sort({ name: 1 });
-
+  const db = getDb();
+  const units = await listUnits(db, { activeOnly: true });
   res.json(units);
 });
 
 export const updateUnit = asyncHandler(async (req, res) => {
-  const unit = await PumpUnit.findOne({ _id: req.params.id, isActive: true });
+  const db = getDb();
+  const unit = await getUnitById(db, req.params.id);
 
   if (!unit) {
     const error = new Error('Unit not found');
@@ -77,43 +64,37 @@ export const updateUnit = asyncHandler(async (req, res) => {
   }
 
   if (req.body.name && req.body.name !== unit.name) {
-    const existingUnit = await PumpUnit.findOne({
-      name: req.body.name.trim(),
-      _id: { $ne: unit._id },
-    });
+    try {
+      await db.query(
+        `
+          UPDATE pump_units
+          SET name = $2, updated_at = NOW()
+          WHERE id = $1 AND is_active = TRUE
+        `,
+        [req.params.id, req.body.name.trim()]
+      );
+    } catch (error) {
+      if (error?.code === '23505') {
+        const err = new Error('Another unit already uses that name');
+        err.statusCode = 400;
+        throw err;
+      }
 
-    if (existingUnit) {
-      const error = new Error('Another unit already uses that name');
-      error.statusCode = 400;
       throw error;
     }
-
-    unit.name = req.body.name;
-    await unit.save();
   }
 
   if (req.body.nozzleIds) {
-    await assignNozzlesToUnit(unit._id, req.body.nozzleIds);
+    await assignNozzlesToUnit(req.params.id, req.body.nozzleIds);
   }
 
-  const updatedUnit = await PumpUnit.findById(unit._id).populate({
-    path: 'nozzles',
-    populate: {
-      path: 'tank',
-      populate: { path: 'fuelType', select: 'name description' },
-    },
-  })
-    .populate('assignedTo', 'name email role')
-    .populate({
-      path: 'activeSession',
-      populate: { path: 'pumpOperator', select: 'name email role' },
-    });
-
+  const updatedUnit = await getUnitById(db, req.params.id);
   res.json(updatedUnit);
 });
 
 export const deleteUnit = asyncHandler(async (req, res) => {
-  const unit = await PumpUnit.findOne({ _id: req.params.id, isActive: true });
+  const db = getDb();
+  const unit = await getUnitById(db, req.params.id);
 
   if (!unit) {
     const error = new Error('Unit not found');
@@ -121,21 +102,43 @@ export const deleteUnit = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const [openSession, activeShift] = await Promise.all([
-    UnitSession.findOne({ unit: unit._id, status: 'open' }),
-    Shift.findOne({ unit: unit._id, status: 'active' }),
+  const [{ rowCount: openSessionCount }, { rowCount: activeShiftCount }] = await Promise.all([
+    db.query(
+      `
+        SELECT 1
+        FROM unit_sessions
+        WHERE unit_id = $1 AND status = 'open'
+        LIMIT 1
+      `,
+      [req.params.id]
+    ),
+    db.query(
+      `
+        SELECT 1
+        FROM shifts
+        WHERE unit_id = $1 AND status = 'active'
+        LIMIT 1
+      `,
+      [req.params.id]
+    ),
   ]);
 
-  if (unit.status === 'occupied' || openSession || activeShift) {
+  if (unit.status === 'occupied' || openSessionCount > 0 || activeShiftCount > 0) {
     const error = new Error('Unit cannot be deleted while an active session or shift exists');
     error.statusCode = 400;
     throw error;
   }
 
-  await clearUnitNozzles(unit._id);
-  unit.nozzles = [];
-  unit.isActive = false;
-  await unit.save();
+  await clearUnitNozzles(req.params.id);
+
+  await db.query(
+    `
+      UPDATE pump_units
+      SET is_active = FALSE, updated_at = NOW()
+      WHERE id = $1
+    `,
+    [req.params.id]
+  );
 
   res.json({ message: 'Unit deleted successfully' });
 });

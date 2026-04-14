@@ -1,5 +1,6 @@
-import Purchase from '../models/Purchase.js';
-import Tank from '../models/Tank.js';
+import { getDb, withTransaction } from '../config/db.js';
+import { mapId } from '../db/helpers.js';
+import { getPurchaseById, listPurchases } from '../services/dataService.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { increaseTankLevel } from '../services/stockService.js';
 
@@ -18,46 +19,64 @@ export const createPurchase = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const tank = await Tank.findOne({ _id: tankId, isActive: true }).populate('fuelType');
-
-  if (!tank) {
-    const error = new Error('Selected tank is invalid');
-    error.statusCode = 400;
-    throw error;
-  }
-
   const totalCost = Number(quantityLitres) * Number(pricePerLitre);
-  await increaseTankLevel(tank._id, Number(quantityLitres));
+  const db = getDb();
 
-  const purchase = await Purchase.create({
-    tank: tank._id,
-    quantityLitres: Number(quantityLitres),
-    pricePerLitre: Number(pricePerLitre),
-    totalCost,
-    supplier,
-    invoiceNumber,
-    date: date ? new Date(date) : new Date(),
-    enteredBy: req.user._id,
+  const purchaseId = await withTransaction(async (tx) => {
+    const { rowCount: tankCount } = await tx.query(
+      `
+        SELECT 1
+        FROM tanks
+        WHERE id = $1 AND is_active = TRUE
+        LIMIT 1
+      `,
+      [tankId]
+    );
+
+    if (tankCount === 0) {
+      const error = new Error('Selected tank is invalid');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    await increaseTankLevel(tankId, Number(quantityLitres), { client: tx });
+
+    const { rows } = await tx.query(
+      `
+        INSERT INTO purchases (
+          tank_id,
+          quantity_litres,
+          price_per_litre,
+          total_cost,
+          supplier,
+          invoice_number,
+          date,
+          entered_by_user_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id
+      `,
+      [
+        tankId,
+        Number(quantityLitres),
+        Number(pricePerLitre),
+        totalCost,
+        supplier ?? '',
+        invoiceNumber ?? '',
+        date ? new Date(date) : new Date(),
+        req.user._id,
+      ]
+    );
+
+    return rows[0]?.id;
   });
 
-  const populatedPurchase = await Purchase.findById(purchase._id)
-    .populate({
-      path: 'tank',
-      populate: { path: 'fuelType', select: 'name' },
-    })
-    .populate('enteredBy', 'name role');
-
-  res.status(201).json(populatedPurchase);
+  const purchase = await getPurchaseById(db, purchaseId);
+  res.status(201).json(purchase ? mapId(purchase) : null);
 });
 
 export const getPurchases = asyncHandler(async (_req, res) => {
-  const purchases = await Purchase.find({ isDeleted: false })
-    .populate({
-      path: 'tank',
-      populate: { path: 'fuelType', select: 'name description' },
-    })
-    .populate('enteredBy', 'name role')
-    .sort({ date: -1 });
-
+  const db = getDb();
+  const purchases = await listPurchases(db, { includeDeleted: false });
   res.json(purchases);
 });

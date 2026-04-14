@@ -1,4 +1,5 @@
-import Shift from '../models/Shift.js';
+import { getDb } from '../config/db.js';
+import { listShifts } from '../services/dataService.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 export const startShift = asyncHandler(async (req, res) => {
@@ -14,23 +15,13 @@ export const endShift = asyncHandler(async (req, res) => {
 });
 
 export const getShifts = asyncHandler(async (req, res) => {
-  const filter = {};
+  const db = getDb();
 
-  if (req.query.status) {
-    filter.status = req.query.status;
-  }
-
-  if (req.user.role === 'pumpOperator') {
-    filter.startedBy = req.user._id;
-  } else if (req.query.unitId) {
-    filter.unit = req.query.unitId;
-  }
-
-  const shifts = await Shift.find(filter)
-    .populate('unit', 'name')
-    .populate('startedBy', 'name role')
-    .populate('endedBy', 'name role')
-    .sort({ startTime: -1 });
+  const shifts = await listShifts(db, {
+    status: req.query.status || null,
+    unitId: req.user.role === 'pumpOperator' ? null : req.query.unitId || null,
+    startedByUserId: req.user.role === 'pumpOperator' ? req.user._id : null,
+  });
 
   res.json(shifts);
 });

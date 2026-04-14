@@ -1,5 +1,5 @@
-import Nozzle from '../models/Nozzle.js';
-import PumpUnit from '../models/PumpUnit.js';
+import { getDb } from '../config/db.js';
+import { createHttpError } from '../db/helpers.js';
 
 const normalizeIds = (items = []) => [...new Set(items.map((item) => item.toString()))];
 
@@ -10,20 +10,23 @@ const ensureUnitsAvailable = async (unitIds = []) => {
     return;
   }
 
-  const occupiedUnits = await PumpUnit.find({
-    _id: { $in: normalizedIds },
-    isActive: true,
-    status: 'occupied',
-  }).select('name');
+  const db = getDb();
+  const { rows } = await db.query(
+    `
+      SELECT name
+      FROM pump_units
+      WHERE id = ANY($1::uuid[])
+        AND is_active = TRUE
+        AND status = 'occupied'
+    `,
+    [normalizedIds]
+  );
 
-  if (occupiedUnits.length) {
-    const error = new Error(
-      `Cannot modify nozzles while unit is occupied: ${occupiedUnits
-        .map((unit) => unit.name)
-        .join(', ')}`
+  if (rows.length) {
+    throw createHttpError(
+      `Cannot modify nozzles while unit is occupied: ${rows.map((row) => row.name).join(', ')}`,
+      400
     );
-    error.statusCode = 400;
-    throw error;
   }
 };
 
@@ -32,72 +35,89 @@ export const refreshUnitNozzles = async (unitId) => {
     return;
   }
 
-  const nozzles = await Nozzle.find({ unit: unitId, isActive: true }).select('_id');
-  await PumpUnit.findByIdAndUpdate(unitId, {
-    nozzles: nozzles.map((item) => item._id),
-  });
+  // nozzles are derived via queries in PostgreSQL; no denormalized list stored.
 };
 
 export const assignNozzlesToUnit = async (unitId, nozzleIds = []) => {
   const normalizedIds = normalizeIds(nozzleIds);
-  const unit = await PumpUnit.findOne({ _id: unitId, isActive: true });
+  const db = getDb();
+  const { rowCount: unitCount } = await db.query(
+    `
+      SELECT 1
+      FROM pump_units
+      WHERE id = $1 AND is_active = TRUE
+      LIMIT 1
+    `,
+    [unitId]
+  );
 
-  if (!unit) {
-    const error = new Error('Pump unit not found');
-    error.statusCode = 404;
-    throw error;
+  if (unitCount === 0) {
+    throw createHttpError('Pump unit not found', 404);
   }
 
   await ensureUnitsAvailable([unitId]);
 
   if (normalizedIds.length) {
-    const nozzles = await Nozzle.find({
-      _id: { $in: normalizedIds },
-      isActive: true,
-    });
+    const { rows: nozzleRows } = await db.query(
+      `
+        SELECT id, unit_id AS "unitId"
+        FROM nozzles
+        WHERE id = ANY($1::uuid[])
+          AND is_active = TRUE
+      `,
+      [normalizedIds]
+    );
 
-    if (nozzles.length !== normalizedIds.length) {
-      const error = new Error('One or more nozzles are invalid');
-      error.statusCode = 400;
-      throw error;
+    if (nozzleRows.length !== normalizedIds.length) {
+      throw createHttpError('One or more nozzles are invalid', 400);
     }
 
-    const previousUnitIds = normalizeIds(
-      nozzles.filter((item) => item.unit).map((item) => item.unit)
-    );
+    const previousUnitIds = normalizeIds(nozzleRows.map((row) => row.unitId).filter(Boolean));
 
     await ensureUnitsAvailable(previousUnitIds);
 
-    await Nozzle.updateMany(
-      {
-        unit: unitId,
-        _id: { $nin: normalizedIds },
-      },
-      {
-        $set: { unit: null },
-      }
+    await db.query(
+      `
+        UPDATE nozzles
+        SET unit_id = NULL, updated_at = NOW()
+        WHERE unit_id = $1
+          AND is_active = TRUE
+          AND NOT (id = ANY($2::uuid[]))
+      `,
+      [unitId, normalizedIds]
     );
 
-    await Nozzle.updateMany(
-      {
-        _id: { $in: normalizedIds },
-      },
-      {
-        $set: { unit: unitId },
-      }
+    await db.query(
+      `
+        UPDATE nozzles
+        SET unit_id = $2, updated_at = NOW()
+        WHERE id = ANY($1::uuid[])
+      `,
+      [normalizedIds, unitId]
     );
 
-    const unitIdsToRefresh = normalizeIds([unitId, ...previousUnitIds]);
-    await Promise.all(unitIdsToRefresh.map((item) => refreshUnitNozzles(item)));
     return;
   }
 
-  await Nozzle.updateMany({ unit: unitId }, { $set: { unit: null } });
-  await refreshUnitNozzles(unitId);
+  await db.query(
+    `
+      UPDATE nozzles
+      SET unit_id = NULL, updated_at = NOW()
+      WHERE unit_id = $1 AND is_active = TRUE
+    `,
+    [unitId]
+  );
 };
 
 export const clearUnitNozzles = async (unitId) => {
   await ensureUnitsAvailable([unitId]);
-  await Nozzle.updateMany({ unit: unitId }, { $set: { unit: null } });
-  await refreshUnitNozzles(unitId);
+  const db = getDb();
+  await db.query(
+    `
+      UPDATE nozzles
+      SET unit_id = NULL, updated_at = NOW()
+      WHERE unit_id = $1 AND is_active = TRUE
+    `,
+    [unitId]
+  );
 };

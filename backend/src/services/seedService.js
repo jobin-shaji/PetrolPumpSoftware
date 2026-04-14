@@ -1,12 +1,5 @@
 import bcrypt from 'bcryptjs';
-import FuelType from '../models/FuelType.js';
-import Nozzle from '../models/Nozzle.js';
-import PumpUnit from '../models/PumpUnit.js';
-import Tank from '../models/Tank.js';
-import UnitSession from '../models/UnitSession.js';
-import User from '../models/User.js';
-import NozzleReading from '../models/NozzleReading.js';
-import { refreshUnitNozzles } from './unitService.js';
+import { getDb, withTransaction } from '../config/db.js';
 
 const defaultFuelTypes = [
   { name: 'Motospot', description: 'Petrol' },
@@ -37,168 +30,197 @@ const defaultUsers = [
 ];
 
 export const ensureSeedData = async () => {
-  await User.updateMany({ role: 'pumper' }, { $set: { role: 'pumpOperator' } });
+  const db = getDb();
 
-  const renamedSeedUser = await User.findOne({ email: 'pumpoperator@pump.local' });
-  const legacySeedUser = await User.findOne({ email: 'pumper@pump.local' });
+  await withTransaction(async (tx) => {
+    const { rows: fuelCountRows } = await tx.query('SELECT COUNT(*)::int AS count FROM fuel_types');
+    const fuelCount = fuelCountRows[0]?.count ?? 0;
 
-  if (legacySeedUser && !renamedSeedUser) {
-    legacySeedUser.name = 'Default Pump Operator';
-    legacySeedUser.email = 'pumpoperator@pump.local';
-    legacySeedUser.role = 'pumpOperator';
-    legacySeedUser.passwordHash = await bcrypt.hash('PumpOperator@123', 10);
-    await legacySeedUser.save();
-  } else if (renamedSeedUser) {
-    if (renamedSeedUser.role !== 'pumpOperator') {
-      renamedSeedUser.role = 'pumpOperator';
+    if (fuelCount === 0) {
+      await Promise.all(
+        defaultFuelTypes.map((fuelType) =>
+          tx.query(
+            `
+              INSERT INTO fuel_types (name, description)
+              VALUES ($1, $2)
+              ON CONFLICT (name) DO NOTHING
+            `,
+            [fuelType.name, fuelType.description]
+          )
+        )
+      );
     }
 
-    if (renamedSeedUser.name !== 'Default Pump Operator') {
-      renamedSeedUser.name = 'Default Pump Operator';
-    }
-
-    await renamedSeedUser.save();
-  }
-
-  await UnitSession.collection.updateMany(
-    {
-      pumper: { $exists: true },
-      pumpOperator: { $exists: false },
-    },
-    [
-      {
-        $set: {
-          pumpOperator: '$pumper',
-        },
-      },
-      {
-        $unset: 'pumper',
-      },
-    ]
-  );
-
-  try {
-    await UnitSession.collection.dropIndex('pumper_1_status_1');
-  } catch (_error) {
-    // Ignore when the legacy index is already missing.
-  }
-
-  await UnitSession.createIndexes();
-
-  const fuelCount = await FuelType.countDocuments();
-
-  if (fuelCount === 0) {
-    await FuelType.insertMany(defaultFuelTypes);
-  }
-
-  const fuelTypes = await FuelType.find({ isActive: true }).sort({ name: 1 });
-  const tankCount = await Tank.countDocuments();
-
-  if (tankCount === 0) {
-    const tankPayload = fuelTypes.map((fuelType) => ({
-      fuelType: fuelType._id,
-      capacity: 10000,
-      currentLevel: 5000,
-    }));
-
-    await Tank.insertMany(tankPayload);
-  }
-
-  const unitCount = await PumpUnit.countDocuments();
-
-  if (unitCount === 0) {
-    await PumpUnit.insertMany([
-      { name: 'Unit 1' },
-      { name: 'Unit 2' },
-      { name: 'Unit 3' },
-    ]);
-  }
-
-  const nozzleCount = await Nozzle.countDocuments();
-
-  if (nozzleCount === 0) {
-    const tanks = await Tank.find({ isActive: true }).populate('fuelType');
-    const tankMap = Object.fromEntries(
-      tanks.map((tank) => [tank.fuelType.name, tank._id.toString()])
+    const { rows: fuelRows } = await tx.query(
+      `
+        SELECT id, name
+        FROM fuel_types
+        WHERE is_active = TRUE
+        ORDER BY name ASC
+      `
     );
-    const units = await PumpUnit.find({ isActive: true }).sort({ name: 1 });
 
-    await Nozzle.insertMany([
-      ...Array.from({ length: 4 }).map((_, index) => ({
-        nozzleNumber: `M-${index + 1}`,
-        tank: tankMap.Motospot,
-        unit: units[0]?._id,
-      })),
-      ...Array.from({ length: 4 }).map((_, index) => ({
-        nozzleNumber: `HSD-${index + 1}`,
-        tank: tankMap['High Speed Diesel'],
-        unit: units[1]?._id,
-      })),
-      ...Array.from({ length: 2 }).map((_, index) => ({
-        nozzleNumber: `SP95-${index + 1}`,
-        tank: tankMap.SP95,
-        unit: units[2]?._id,
-      })),
-      ...Array.from({ length: 2 }).map((_, index) => ({
-        nozzleNumber: `GD-${index + 1}`,
-        tank: tankMap['Green Diesel'],
-        unit: units[2]?._id,
-      })),
-    ]);
-  }
+    const { rows: tankCountRows } = await tx.query('SELECT COUNT(*)::int AS count FROM tanks');
+    const tankCount = tankCountRows[0]?.count ?? 0;
 
-  const units = await PumpUnit.find({ isActive: true });
-  await Promise.all(units.map((unit) => refreshUnitNozzles(unit._id)));
-  await PumpUnit.updateMany(
-    {},
-    {
-      $set: {
-        status: 'available',
-        assignedTo: null,
-        activeSession: null,
-      },
+    if (tankCount === 0) {
+      await Promise.all(
+        fuelRows.map((fuelType) =>
+          tx.query(
+            `
+              INSERT INTO tanks (fuel_type_id, capacity, current_level)
+              VALUES ($1, $2, $3)
+            `,
+            [fuelType.id, 10000, 5000]
+          )
+        )
+      );
     }
-  );
 
-  const openSessions = await UnitSession.find({ status: 'open' });
+    const { rows: unitCountRows } = await tx.query('SELECT COUNT(*)::int AS count FROM pump_units');
+    const unitCount = unitCountRows[0]?.count ?? 0;
 
-  for (const openSession of openSessions) {
-    await PumpUnit.updateOne(
-      { _id: openSession.unit },
-      {
-        $set: {
-          status: 'occupied',
-          assignedTo: openSession.pumpOperator,
-          activeSession: openSession._id,
-        },
-      }
+    if (unitCount === 0) {
+      await tx.query(
+        `
+          INSERT INTO pump_units (name, status)
+          VALUES
+            ('Unit 1', 'available'),
+            ('Unit 2', 'available'),
+            ('Unit 3', 'available')
+          ON CONFLICT (name) DO NOTHING
+        `
+      );
+    }
+
+    const { rows: tanks } = await tx.query(
+      `
+        SELECT t.id, ft.name AS "fuelTypeName"
+        FROM tanks t
+        JOIN fuel_types ft ON ft.id = t.fuel_type_id
+        WHERE t.is_active = TRUE AND ft.is_active = TRUE
+      `
     );
-  }
 
-  const nozzles = await Nozzle.find({});
+    const tankByFuelName = new Map(tanks.map((row) => [row.fuelTypeName, row.id]));
 
-  for (const nozzle of nozzles) {
-    const latestReading = await NozzleReading.findOne({ nozzle: nozzle._id }).sort({
-      timestamp: -1,
-      createdAt: -1,
-    });
+    const { rows: units } = await tx.query(
+      `
+        SELECT id, name
+        FROM pump_units
+        WHERE is_active = TRUE
+        ORDER BY name ASC
+      `
+    );
 
-    nozzle.latestReading = latestReading?.closingReading ?? 0;
-    nozzle.latestReadingUpdatedAt = latestReading?.timestamp ?? null;
-    await nozzle.save();
-  }
+    const unitByName = new Map(units.map((row) => [row.name, row.id]));
 
+    const { rows: nozzleCountRows } = await tx.query('SELECT COUNT(*)::int AS count FROM nozzles');
+    const nozzleCount = nozzleCountRows[0]?.count ?? 0;
+
+    if (nozzleCount === 0) {
+      const payload = [
+        ...Array.from({ length: 4 }).map((_, index) => ({
+          nozzleNumber: `M-${index + 1}`,
+          fuelTypeName: 'Motospot',
+          unitName: 'Unit 1',
+        })),
+        ...Array.from({ length: 4 }).map((_, index) => ({
+          nozzleNumber: `HSD-${index + 1}`,
+          fuelTypeName: 'High Speed Diesel',
+          unitName: 'Unit 2',
+        })),
+        ...Array.from({ length: 2 }).map((_, index) => ({
+          nozzleNumber: `SP95-${index + 1}`,
+          fuelTypeName: 'SP95',
+          unitName: 'Unit 3',
+        })),
+        ...Array.from({ length: 2 }).map((_, index) => ({
+          nozzleNumber: `GD-${index + 1}`,
+          fuelTypeName: 'Green Diesel',
+          unitName: 'Unit 3',
+        })),
+      ];
+
+      await Promise.all(
+        payload.map((item) =>
+          tx.query(
+            `
+              INSERT INTO nozzles (tank_id, nozzle_number, unit_id)
+              VALUES ($1, $2, $3)
+              ON CONFLICT (nozzle_number) DO NOTHING
+            `,
+            [tankByFuelName.get(item.fuelTypeName), item.nozzleNumber, unitByName.get(item.unitName)]
+          )
+        )
+      );
+    }
+
+    // Bring unit status in sync with open sessions.
+    await tx.query(
+      `
+        UPDATE pump_units u
+        SET
+          status = 'available',
+          assigned_to_user_id = NULL,
+          updated_at = NOW()
+        WHERE u.is_active = TRUE
+          AND NOT EXISTS (
+            SELECT 1
+            FROM unit_sessions us
+            WHERE us.unit_id = u.id AND us.status = 'open'
+          )
+      `
+    );
+
+    await tx.query(
+      `
+        UPDATE pump_units u
+        SET
+          status = 'occupied',
+          assigned_to_user_id = us.pump_operator_id,
+          updated_at = NOW()
+        FROM unit_sessions us
+        WHERE us.unit_id = u.id
+          AND us.status = 'open'
+          AND u.is_active = TRUE
+      `
+    );
+
+    // Refresh nozzle latest readings based on last closed reading.
+    await tx.query(
+      `
+        UPDATE nozzles n
+        SET
+          latest_reading = r.closing_reading,
+          latest_reading_updated_at = r.closed_at,
+          updated_at = NOW()
+        FROM (
+          SELECT DISTINCT ON (nozzle_id)
+            nozzle_id,
+            closing_reading,
+            closed_at
+          FROM unit_session_nozzle_readings
+          WHERE closing_reading IS NOT NULL
+          ORDER BY nozzle_id, closed_at DESC
+        ) r
+        WHERE r.nozzle_id = n.id
+      `
+    );
+  });
+
+  // Ensure default users exist (password hashing outside SQL transaction is fine).
   for (const userSeed of defaultUsers) {
-    const existingUser = await User.findOne({ email: userSeed.email });
+    const passwordHash = await bcrypt.hash(userSeed.password, 10);
 
-    if (!existingUser) {
-      const passwordHash = await bcrypt.hash(userSeed.password, 10);
-      await User.create({
-        name: userSeed.name,
-        email: userSeed.email,
-        passwordHash,
-        role: userSeed.role,
-      });
-    }
+    await db.query(
+      `
+        INSERT INTO users (name, email, password_hash, role)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (email) DO NOTHING
+      `,
+      [userSeed.name, userSeed.email, passwordHash, userSeed.role]
+    );
   }
 };
+

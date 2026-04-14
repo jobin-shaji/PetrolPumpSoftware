@@ -8,7 +8,7 @@ This repository now contains a separate MERN-style backend and frontend:
 ## Backend setup
 
 1. Copy `backend/.env.example` to `backend/.env`
-2. Set `MONGO_URI` and `JWT_SECRET`
+2. Set `DATABASE_URL` (or `PGHOST`/`PGUSER`/`PGPASSWORD`/`PGDATABASE`) and `JWT_SECRET`
 3. Install dependencies inside `backend`
 4. Run `npm run dev`
 
