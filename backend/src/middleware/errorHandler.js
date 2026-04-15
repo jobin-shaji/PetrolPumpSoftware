@@ -20,6 +20,13 @@ export const errorHandler = (error, _req, res, _next) => {
     });
   }
 
+  if (statusCode >= 500) {
+    return res.status(500).json({
+      code: 'SERVER_UNDER_MAINTENANCE',
+      message: 'Server under maintenance',
+    });
+  }
+
   return res.status(statusCode).json({
     message: error.message || 'Internal server error',
   });
