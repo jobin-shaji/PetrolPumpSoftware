@@ -1,7 +1,12 @@
 import bcrypt from 'bcryptjs';
 import { getDb } from '../config/db.js';
 import { handleUniqueViolation, mapId, normalizeBoolean } from '../db/helpers.js';
-import { getUserById, listUsers } from '../services/dataService.js';
+import {
+  getUserById,
+  listUsers,
+  setEmployeeActiveByUserId,
+  upsertEmployeeByUserId,
+} from '../services/dataService.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 export const createUser = asyncHandler(async (req, res) => {
@@ -109,4 +114,42 @@ export const deleteUser = asyncHandler(async (req, res) => {
   );
 
   res.json({ message: 'User deactivated successfully' });
+});
+
+export const makeEmployee = asyncHandler(async (req, res) => {
+  const db = getDb();
+  const user = await getUserById(db, req.params.id);
+
+  if (!user || user.isActive === false) {
+    const error = new Error('User not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  await upsertEmployeeByUserId(db, req.params.id, { isActive: true });
+
+  const updatedUser = await getUserById(db, req.params.id);
+  res.json(updatedUser);
+});
+
+export const disableEmployee = asyncHandler(async (req, res) => {
+  const db = getDb();
+  const user = await getUserById(db, req.params.id);
+
+  if (!user || user.isActive === false) {
+    const error = new Error('User not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const employee = await setEmployeeActiveByUserId(db, req.params.id, false);
+
+  if (!employee) {
+    const error = new Error('Employee profile not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const updatedUser = await getUserById(db, req.params.id);
+  res.json(updatedUser);
 });

@@ -15,6 +15,7 @@ const EntityManager = ({
   columns,
   onRefresh,
   mapItemToForm,
+  renderRowActions,
 }) => {
   const initialState = useMemo(
     () => Object.fromEntries(fields.map((field) => [field.name, getEmptyValue(field)])),
@@ -120,6 +121,7 @@ const EntityManager = ({
       label: 'Actions',
       render: (row) => (
         <div className="row-actions">
+          {renderRowActions ? renderRowActions(row) : null}
           <button type="button" className="ghost-button small" onClick={() => handleEdit(row)}>
             Edit
           </button>

@@ -1,8 +1,10 @@
 import express from 'express';
 import {
   createUser,
+  disableEmployee,
   deleteUser,
   getUsers,
+  makeEmployee,
   updateUser,
 } from '../controllers/userController.js';
 import { authorize, protect } from '../middleware/auth.js';
@@ -13,5 +15,7 @@ router.get('/', protect, authorize('admin', 'manager'), getUsers);
 router.post('/', protect, authorize('admin'), createUser);
 router.patch('/:id', protect, authorize('admin'), updateUser);
 router.delete('/:id', protect, authorize('admin'), deleteUser);
+router.post('/:id/employee', protect, authorize('admin'), makeEmployee);
+router.delete('/:id/employee', protect, authorize('admin'), disableEmployee);
 
 export default router;

@@ -110,16 +110,19 @@ export const getUserRowById = async (db, userId) => {
   const { rows } = await db.query(
     `
       SELECT
-        id,
-        name,
-        email,
-        password_hash AS "passwordHash",
-        role,
-        is_active AS "isActive",
-        created_at AS "createdAt",
-        updated_at AS "updatedAt"
-      FROM users
-      WHERE id = $1
+        u.id,
+        u.name,
+        u.email,
+        u.password_hash AS "passwordHash",
+        u.role,
+        u.is_active AS "isActive",
+        u.created_at AS "createdAt",
+        u.updated_at AS "updatedAt",
+        (e.user_id IS NOT NULL) AS "isEmployee",
+        e.is_active AS "employeeIsActive"
+      FROM users u
+      LEFT JOIN employees e ON e.user_id = u.id
+      WHERE u.id = $1
       LIMIT 1
     `,
     [userId]
@@ -159,6 +162,9 @@ export const mapUserRecord = (row) =>
         email: row.email,
         role: row.role,
         isActive: row.isActive,
+        isEmployee: Boolean(row.isEmployee),
+        employeeIsActive:
+          typeof row.employeeIsActive === 'boolean' ? row.employeeIsActive : null,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
       })
@@ -177,21 +183,53 @@ export const listUsers = async (db, { activeOnly = true } = {}) => {
   const { rows } = await db.query(
     `
       SELECT
-        id,
-        name,
-        email,
-        role,
-        is_active AS "isActive",
-        created_at AS "createdAt",
-        updated_at AS "updatedAt"
-      FROM users
-      ${whereClause}
-      ORDER BY created_at DESC
+        u.id,
+        u.name,
+        u.email,
+        u.role,
+        u.is_active AS "isActive",
+        u.created_at AS "createdAt",
+        u.updated_at AS "updatedAt",
+        (e.user_id IS NOT NULL) AS "isEmployee",
+        e.is_active AS "employeeIsActive"
+      FROM users u
+      LEFT JOIN employees e ON e.user_id = u.id
+      ${whereClause.replace('is_active', 'u.is_active')}
+      ORDER BY u.created_at DESC
     `,
     params
   );
 
   return rows.map((row) => mapUserRecord(row));
+};
+
+export const upsertEmployeeByUserId = async (db, userId, { isActive = true } = {}) => {
+  const { rows } = await db.query(
+    `
+      INSERT INTO employees (user_id, is_active)
+      VALUES ($1, $2::boolean)
+      ON CONFLICT (user_id)
+      DO UPDATE SET is_active = EXCLUDED.is_active, updated_at = NOW()
+      RETURNING id, user_id AS "userId", is_active AS "isActive", created_at AS "createdAt", updated_at AS "updatedAt"
+    `,
+    [userId, isActive]
+  );
+
+  return rows[0] || null;
+};
+
+export const setEmployeeActiveByUserId = async (db, userId, isActive) => {
+  const { rows } = await db.query(
+    `
+      UPDATE employees
+      SET is_active = $2::boolean, updated_at = NOW()
+      WHERE user_id = $1
+      RETURNING id, user_id AS "userId", is_active AS "isActive", created_at AS "createdAt", updated_at AS "updatedAt"
+    `,
+    [userId, isActive]
+  );
+
+  return rows[0] || null;
 };
 
 export const getUserById = async (db, userId) => {
