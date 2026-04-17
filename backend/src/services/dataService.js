@@ -297,6 +297,78 @@ export const getFuelTypeById = async (db, fuelTypeId) => {
     : null;
 };
 
+export const listCurrentFuelPrices = async (db) => {
+  const { rows } = await db.query(
+    `
+      SELECT
+        ft.id AS "fuelTypeId",
+        ft.name AS "fuelTypeName",
+        ft.description AS "fuelTypeDescription",
+        ft.is_active AS "fuelTypeIsActive",
+        ft.created_at AS "fuelTypeCreatedAt",
+        ft.updated_at AS "fuelTypeUpdatedAt",
+        p.id AS "priceId",
+        p.price_date AS "priceDate",
+        p.price_per_litre AS "pricePerLitre",
+        p.created_at AS "priceCreatedAt",
+        p.updated_at AS "priceUpdatedAt",
+        (p.price_date = CURRENT_DATE) AS "isUpdatedToday",
+        u.id AS "updatedById",
+        u.name AS "updatedByName",
+        u.email AS "updatedByEmail",
+        u.role AS "updatedByRole",
+        u.is_active AS "updatedByIsActive",
+        u.created_at AS "updatedByCreatedAt",
+        u.updated_at AS "updatedByUpdatedAt"
+      FROM fuel_types ft
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM daily_fuel_prices p
+        WHERE p.fuel_type_id = ft.id
+        ORDER BY p.price_date DESC, p.created_at DESC
+        LIMIT 1
+      ) p ON TRUE
+      LEFT JOIN users u ON u.id = p.updated_by_user_id
+      WHERE ft.is_active = TRUE
+      ORDER BY ft.name ASC
+    `
+  );
+
+  return rows.map((row) => ({
+    fuelType: mapFuelTypeFromPrefix(row, 'fuelType'),
+    priceId: row.priceId || null,
+    priceDate: row.priceDate,
+    pricePerLitre: normalizeNumeric(row.pricePerLitre),
+    priceCreatedAt: row.priceCreatedAt,
+    priceUpdatedAt: row.priceUpdatedAt,
+    isUpdatedToday: Boolean(row.isUpdatedToday),
+    updatedBy: mapUserFromPrefix(row, 'updatedBy'),
+  }));
+};
+
+export const upsertDailyFuelPrice = async (db, { fuelTypeId, pricePerLitre, updatedByUserId }) => {
+  const { rows } = await db.query(
+    `
+      INSERT INTO daily_fuel_prices (
+        fuel_type_id,
+        price_date,
+        price_per_litre,
+        updated_by_user_id
+      )
+      VALUES ($1, CURRENT_DATE, $2, $3)
+      ON CONFLICT (fuel_type_id, price_date)
+      DO UPDATE SET
+        price_per_litre = EXCLUDED.price_per_litre,
+        updated_by_user_id = EXCLUDED.updated_by_user_id,
+        updated_at = NOW()
+      RETURNING id, fuel_type_id AS "fuelTypeId", price_date AS "priceDate", price_per_litre AS "pricePerLitre", updated_by_user_id AS "updatedByUserId", created_at AS "createdAt", updated_at AS "updatedAt"
+    `,
+    [fuelTypeId, pricePerLitre, updatedByUserId]
+  );
+
+  return rows[0] || null;
+};
+
 export const listTanks = async (db, { activeOnly = true, ids = null } = {}) => {
   const params = [activeOnly];
   let whereClause = 'WHERE ($1::boolean = FALSE OR t.is_active = TRUE)';

@@ -379,6 +379,10 @@ a {
   font-size: 0.9rem;
 }
 
+.section-spacer {
+  height: 14px;
+}
+
 .inline-level-marker {
   display: flex;
   align-items: center;
@@ -510,6 +514,12 @@ a {
   background: rgba(240, 253, 244, 0.96);
   border-color: #bbf7d0;
   color: #166534;
+}
+
+.alert-warning {
+  background: rgba(255, 251, 235, 0.96);
+  border-color: #fde68a;
+  color: #92400e;
 }
 
 @keyframes alert-slide-in {

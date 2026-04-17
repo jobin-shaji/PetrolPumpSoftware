@@ -2,6 +2,7 @@ import cors from 'cors';
 import express from 'express';
 import authRoutes from './routes/authRoutes.js';
 import fuelTypeRoutes from './routes/fuelTypeRoutes.js';
+import fuelPriceRoutes from './routes/fuelPriceRoutes.js';
 import nozzleRoutes from './routes/nozzleRoutes.js';
 import purchaseRoutes from './routes/purchaseRoutes.js';
 import readingRoutes from './routes/readingRoutes.js';
@@ -30,6 +31,7 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/fuel-types', fuelTypeRoutes);
+app.use('/api/fuel-prices', fuelPriceRoutes);
 app.use('/api/tanks', tankRoutes);
 app.use('/api/nozzles', nozzleRoutes);
 app.use('/api/units', unitRoutes);

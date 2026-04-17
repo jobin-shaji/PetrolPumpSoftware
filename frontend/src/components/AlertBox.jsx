@@ -8,7 +8,7 @@ const AlertBox = ({ message, variant = 'error' }) => {
   }, [message]);
 
   useEffect(() => {
-    if (!message || variant !== 'success') {
+    if (!message || (variant !== 'success' && variant !== 'warning')) {
       return undefined;
     }
 
@@ -24,11 +24,11 @@ const AlertBox = ({ message, variant = 'error' }) => {
   }
 
   return (
-    <div
-      className={`alert-box alert-${variant}`}
-      role={variant === 'error' ? 'alert' : 'status'}
-      aria-live={variant === 'error' ? 'assertive' : 'polite'}
-    >
+      <div
+        className={`alert-box alert-${variant}`}
+        role={variant === 'error' ? 'alert' : 'status'}
+        aria-live={variant === 'error' ? 'assertive' : 'polite'}
+      >
       <div className="alert-content">
         <p>{message}</p>
         <button

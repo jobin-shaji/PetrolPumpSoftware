@@ -20,6 +20,19 @@ CREATE TABLE IF NOT EXISTS fuel_types (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS daily_fuel_prices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fuel_type_id UUID NOT NULL REFERENCES fuel_types(id),
+  price_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  price_per_litre NUMERIC(14, 3) NOT NULL CHECK (price_per_litre > 0),
+  updated_by_user_id UUID NOT NULL REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (fuel_type_id, price_date)
+);
+
+CREATE INDEX IF NOT EXISTS daily_fuel_prices_date_idx ON daily_fuel_prices (price_date DESC);
+
 CREATE TABLE IF NOT EXISTS pump_units (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL UNIQUE,
