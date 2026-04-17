@@ -194,7 +194,7 @@ const DashboardManagerPurchases = () => {
               columns={[
                 { key: 'fuelType', label: 'Fuel', render: (row) => row.fuelType?.name || '-' },
                 { key: 'capacity', label: 'Capacity' },
-                { key: 'currentLevel', label: 'Current Level' },
+                { key: 'currentLevel', label: 'Current Stock Level' },
               ]}
               emptyMessage="No tanks configured."
             />

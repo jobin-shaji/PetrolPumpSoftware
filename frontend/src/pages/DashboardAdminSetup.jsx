@@ -108,19 +108,19 @@ const DashboardAdminSetup = () => {
 
           <EntityManager
             title="Tanks"
-            description="Control tank fuel mapping, capacity, and current levels."
+            description="Control tank fuel mapping, capacity, and system-updated stock levels."
             endpoint="/tanks"
             items={data.tanks}
             onRefresh={loadSetup}
             fields={[
               { name: 'fuelType', label: 'Fuel Type', type: 'select', options: fuelOptions },
               { name: 'capacity', label: 'Capacity', type: 'number' },
-              { name: 'currentLevel', label: 'Current Level', type: 'number' },
+              { name: 'currentLevel', label: 'Current Stock Level', type: 'number' },
             ]}
             columns={[
               { key: 'fuelType', label: 'Fuel Type', render: (row) => row.fuelType?.name || '-' },
               { key: 'capacity', label: 'Capacity' },
-              { key: 'currentLevel', label: 'Current Level' },
+              { key: 'currentLevel', label: 'Current Stock Level' },
             ]}
             mapItemToForm={(item) => ({
               fuelType: item.fuelType?._id || '',
