@@ -108,11 +108,6 @@ const AdminDashboard = () => {
     value: unit._id,
   }));
 
-  const nozzleOptions = data.nozzles.map((nozzle) => ({
-    label: `${nozzle.nozzleNumber} (${nozzle.tank?.fuelType?.name || 'No fuel'})`,
-    value: nozzle._id,
-  }));
-
   const metrics = [
     {
       label: 'Revenue',
@@ -329,6 +324,37 @@ const AdminDashboard = () => {
           />
 
           <EntityManager
+            title="Pump Units"
+            description="Create pump units; assign nozzles from the Nozzles section below."
+            endpoint="/units"
+            items={data.units}
+            onRefresh={loadDashboard}
+            fields={[
+              { name: 'name', label: 'Unit Name' },
+            ]}
+            columns={[
+              { key: 'name', label: 'Unit' },
+              { key: 'status', label: 'Status' },
+              {
+                key: 'assignedTo',
+                label: 'Occupied By',
+                render: (row) => row.assignedTo?.name || '-',
+              },
+              {
+                key: 'nozzles',
+                label: 'Nozzles',
+                render: (row) =>
+                  row.nozzles?.length
+                    ? row.nozzles.map((nozzle) => nozzle.nozzleNumber).join(', ')
+                    : '-',
+              },
+            ]}
+            mapItemToForm={(item) => ({
+              name: item.name || '',
+            })}
+          />
+
+          <EntityManager
             title="Nozzles"
             description="Attach nozzles to tanks, optionally pin them to units, and view the latest recorded reading."
             endpoint="/nozzles"
@@ -372,44 +398,6 @@ const AdminDashboard = () => {
               nozzleNumber: item.nozzleNumber || '',
               tank: item.tank?._id || '',
               unit: item.unit?._id || '',
-            })}
-          />
-
-          <EntityManager
-            title="Pump Units"
-            description="Units now expose live availability and current session ownership."
-            endpoint="/units"
-            items={data.units}
-            onRefresh={loadDashboard}
-            fields={[
-              { name: 'name', label: 'Unit Name' },
-              {
-                name: 'nozzleIds',
-                label: 'Assigned Nozzles',
-                type: 'multiselect',
-                options: nozzleOptions,
-              },
-            ]}
-            columns={[
-              { key: 'name', label: 'Unit' },
-              { key: 'status', label: 'Status' },
-              {
-                key: 'assignedTo',
-                label: 'Occupied By',
-                render: (row) => row.assignedTo?.name || '-',
-              },
-              {
-                key: 'nozzles',
-                label: 'Nozzles',
-                render: (row) =>
-                  row.nozzles?.length
-                    ? row.nozzles.map((nozzle) => nozzle.nozzleNumber).join(', ')
-                    : '-',
-              },
-            ]}
-            mapItemToForm={(item) => ({
-              name: item.name || '',
-              nozzleIds: item.nozzles?.map((nozzle) => nozzle._id) || [],
             })}
           />
 

@@ -23,6 +23,7 @@ const EntityManager = ({
   );
   const [form, setForm] = useState(initialState);
   const [editingId, setEditingId] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -30,6 +31,19 @@ const EntityManager = ({
     setEditingId(null);
     setError('');
     setForm(Object.fromEntries(fields.map((field) => [field.name, getEmptyValue(field)])));
+  };
+
+  const openCreateModal = () => {
+    resetForm();
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    if (saving) {
+      return;
+    }
+    setIsModalOpen(false);
+    resetForm();
   };
 
   const handleChange = (field, value) => {
@@ -81,6 +95,7 @@ const EntityManager = ({
         await api.post(endpoint, payload);
       }
 
+      setIsModalOpen(false);
       resetForm();
       await onRefresh();
     } catch (requestError) {
@@ -94,6 +109,7 @@ const EntityManager = ({
     setEditingId(item._id);
     setError('');
     setForm(mapItemToForm ? mapItemToForm(item) : initialState);
+    setIsModalOpen(true);
   };
 
   const handleDelete = async (id) => {
@@ -142,79 +158,93 @@ const EntityManager = ({
       title={title}
       description={description}
       actions={
-        editingId ? (
-          <button type="button" className="ghost-button small" onClick={resetForm}>
-            Cancel edit
-          </button>
-        ) : null
+        <button type="button" className="primary-button small" onClick={openCreateModal}>
+          Create
+        </button>
       }
     >
-      <form className="entity-form" onSubmit={handleSubmit}>
-        <div className="form-grid">
-          {fields.map((field) => {
-            if (field.type === 'textarea') {
-              return (
-                <label key={field.name} className="form-field">
-                  <span>{field.label}</span>
-                  <textarea
-                    value={form[field.name]}
-                    onChange={(event) => handleChange(field, event.target.value)}
-                    placeholder={field.placeholder || ''}
-                  />
-                </label>
-              );
-            }
-
-            if (field.type === 'select' || field.type === 'multiselect') {
-              return (
-                <label key={field.name} className="form-field">
-                  <span>{field.label}</span>
-                  <select
-                    multiple={field.type === 'multiselect'}
-                    value={form[field.name]}
-                    onChange={(event) => {
-                      const value =
-                        field.type === 'multiselect'
-                          ? Array.from(event.target.selectedOptions).map((option) => option.value)
-                          : event.target.value;
-                      handleChange(field, value);
-                    }}
-                  >
-                    {field.type === 'select' ? <option value="">Select</option> : null}
-                    {field.options.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              );
-            }
-
-            return (
-              <label key={field.name} className="form-field">
-                <span>{field.label}</span>
-                <input
-                  type={field.type || 'text'}
-                  value={form[field.name]}
-                  onChange={(event) => handleChange(field, event.target.value)}
-                  placeholder={field.placeholder || ''}
-                />
-              </label>
-            );
-          })}
-        </div>
-
-        <AlertBox message={error} variant="error" />
-
-        <div className="form-actions">
-          <button type="submit" className="primary-button" disabled={saving}>
-            {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
-          </button>
-        </div>
-      </form>
-
       <DataTable columns={actionColumns} rows={items} />
+
+      {isModalOpen ? (
+        <div className="modal-backdrop" onClick={closeModal}>
+          <div className="modal-panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{editingId ? `Edit ${title}` : `Create ${title}`}</h3>
+              <button type="button" className="ghost-button small" onClick={closeModal}>
+                Close
+              </button>
+            </div>
+
+            <form className="entity-form" onSubmit={handleSubmit}>
+              <div className="form-grid">
+                {fields.map((field) => {
+                  if (field.type === 'textarea') {
+                    return (
+                      <label key={field.name} className="form-field">
+                        <span>{field.label}</span>
+                        <textarea
+                          value={form[field.name]}
+                          onChange={(event) => handleChange(field, event.target.value)}
+                          placeholder={field.placeholder || ''}
+                        />
+                      </label>
+                    );
+                  }
+
+                  if (field.type === 'select' || field.type === 'multiselect') {
+                    return (
+                      <label key={field.name} className="form-field">
+                        <span>{field.label}</span>
+                        <select
+                          multiple={field.type === 'multiselect'}
+                          value={form[field.name]}
+                          onChange={(event) => {
+                            const value =
+                              field.type === 'multiselect'
+                                ? Array.from(event.target.selectedOptions).map((option) => option.value)
+                                : event.target.value;
+                            handleChange(field, value);
+                          }}
+                        >
+                          {field.type === 'select' ? <option value="">Select</option> : null}
+                          {field.options.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  }
+
+                  return (
+                    <label key={field.name} className="form-field">
+                      <span>{field.label}</span>
+                      <input
+                        type={field.type || 'text'}
+                        value={form[field.name]}
+                        onChange={(event) => handleChange(field, event.target.value)}
+                        placeholder={field.placeholder || ''}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+
+              <AlertBox message={error} variant="error" />
+
+              <div className="form-actions">
+                <button type="submit" className="primary-button" disabled={saving}>
+                  {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
+                </button>
+                <button type="button" className="ghost-button" onClick={closeModal} disabled={saving}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </SectionCard>
   );
 };

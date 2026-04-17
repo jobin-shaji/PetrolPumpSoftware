@@ -70,15 +70,6 @@ const DashboardAdminSetup = () => {
     [data.units]
   );
 
-  const nozzleOptions = useMemo(
-    () =>
-      data.nozzles.map((nozzle) => ({
-        label: `${nozzle.nozzleNumber} (${nozzle.tank?.fuelType?.name || 'No fuel'})`,
-        value: nozzle._id,
-      })),
-    [data.nozzles]
-  );
-
   return (
     <Layout title="Setup" subtitle="Configure fuels, tanks, nozzles, and pump units.">
       {loading ? <div className="page-state">Loading setup...</div> : null}
@@ -120,12 +111,57 @@ const DashboardAdminSetup = () => {
             columns={[
               { key: 'fuelType', label: 'Fuel Type', render: (row) => row.fuelType?.name || '-' },
               { key: 'capacity', label: 'Capacity' },
-              { key: 'currentLevel', label: 'Current Stock Level' },
+              {
+                key: 'currentLevel',
+                label: 'Current Stock Level',
+                render: (row) => {
+                  const capacity = Number(row.capacity || 0);
+                  const currentLevel = Number(row.currentLevel || 0);
+                  const fillPercent =
+                    capacity > 0
+                      ? Math.max(0, Math.min(100, (currentLevel / capacity) * 100))
+                      : 0;
+
+                  return (
+                    <div className="inline-level-marker">
+                      <div className="inline-level-track">
+                        <div className="inline-level-fill" style={{ width: `${fillPercent}%` }} />
+                      </div>
+                      <span>{currentLevel}</span>
+                    </div>
+                  );
+                },
+              },
             ]}
             mapItemToForm={(item) => ({
               fuelType: item.fuelType?._id || '',
               capacity: item.capacity ?? '',
               currentLevel: item.currentLevel ?? '',
+            })}
+          />
+
+          <EntityManager
+            title="Pump Units"
+            description="Create pump units; assign nozzles from the Nozzles section below."
+            endpoint="/units"
+            items={data.units}
+            onRefresh={loadSetup}
+            fields={[
+              { name: 'name', label: 'Unit Name' },
+            ]}
+            columns={[
+              { key: 'name', label: 'Unit' },
+              { key: 'status', label: 'Status' },
+              { key: 'assignedTo', label: 'Occupied By', render: (row) => row.assignedTo?.name || '-' },
+              {
+                key: 'nozzles',
+                label: 'Nozzles',
+                render: (row) =>
+                  row.nozzles?.length ? row.nozzles.map((n) => n.nozzleNumber).join(', ') : '-',
+              },
+            ]}
+            mapItemToForm={(item) => ({
+              name: item.name || '',
             })}
           />
 
@@ -150,33 +186,6 @@ const DashboardAdminSetup = () => {
               nozzleNumber: item.nozzleNumber || '',
               tank: item.tank?._id || '',
               unit: item.unit?._id || '',
-            })}
-          />
-
-          <EntityManager
-            title="Pump Units"
-            description="Configure unit/nozzle mapping and monitor live availability."
-            endpoint="/units"
-            items={data.units}
-            onRefresh={loadSetup}
-            fields={[
-              { name: 'name', label: 'Unit Name' },
-              { name: 'nozzleIds', label: 'Assigned Nozzles', type: 'multiselect', options: nozzleOptions },
-            ]}
-            columns={[
-              { key: 'name', label: 'Unit' },
-              { key: 'status', label: 'Status' },
-              { key: 'assignedTo', label: 'Occupied By', render: (row) => row.assignedTo?.name || '-' },
-              {
-                key: 'nozzles',
-                label: 'Nozzles',
-                render: (row) =>
-                  row.nozzles?.length ? row.nozzles.map((n) => n.nozzleNumber).join(', ') : '-',
-              },
-            ]}
-            mapItemToForm={(item) => ({
-              name: item.name || '',
-              nozzleIds: item.nozzles?.map((nozzle) => nozzle._id) || [],
             })}
           />
         </>

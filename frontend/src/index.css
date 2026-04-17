@@ -37,7 +37,33 @@ a {
 }
 
 .app-shell {
-  padding: 24px;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px;
+}
+
+.app-content {
+  min-width: 0;
+}
+
+.sidebar {
+  border-radius: 22px;
+  padding: 18px 14px;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #334155;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.24);
+}
+
+.sidebar .eyebrow {
+  color: #fdba74;
+  margin-bottom: 14px;
+}
+
+.sidebar-nav {
+  display: grid;
+  gap: 8px;
 }
 
 .topbar {
@@ -93,24 +119,24 @@ a {
   font-size: 0.9rem;
 }
 
-.nav-strip {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 18px;
-}
-
 .nav-link {
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: #ffffff;
-  border: 1px solid #dbe4ee;
-  color: #475569;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  color: #cbd5e1;
+  transition: all 0.18s ease;
 }
 
 .nav-link.active {
   background: #c2410c;
-  border-color: #c2410c;
+  border-color: #ea580c;
   color: #ffffff;
+}
+
+.nav-link:hover {
+  border-color: #475569;
+  color: #e2e8f0;
 }
 
 .dashboard-grid {
@@ -257,6 +283,121 @@ a {
 .row-actions {
   display: flex;
   gap: 8px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(15, 23, 42, 0.65);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.modal-panel {
+  width: min(820px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+  padding: 18px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.tank-marker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.tank-marker-card {
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.tank-marker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.tank-marker-header strong {
+  color: #0f172a;
+}
+
+.tank-marker-header span {
+  color: #9a3412;
+  font-weight: 700;
+}
+
+.tank-marker-body {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.tank-tube {
+  width: 28px;
+  height: 112px;
+  border-radius: 14px;
+  border: 2px solid #94a3b8;
+  background: #dbeafe;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+}
+
+.tank-tube-fill {
+  width: 100%;
+  min-height: 4px;
+  background: linear-gradient(180deg, #fb7185 0%, #ea580c 100%);
+  transition: height 0.3s ease;
+}
+
+.tank-marker-values {
+  display: grid;
+  gap: 4px;
+  color: #334155;
+  font-size: 0.9rem;
+}
+
+.inline-level-marker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+}
+
+.inline-level-track {
+  width: 90px;
+  height: 10px;
+  border-radius: 999px;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  overflow: hidden;
+}
+
+.inline-level-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #fb7185 0%, #ea580c 100%);
 }
 
 .reading-stack {
@@ -418,7 +559,17 @@ a {
 
 @media (max-width: 768px) {
   .app-shell {
-    padding: 16px;
+    grid-template-columns: 1fr;
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .sidebar {
+    padding: 12px;
+  }
+
+  .sidebar-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .topbar {

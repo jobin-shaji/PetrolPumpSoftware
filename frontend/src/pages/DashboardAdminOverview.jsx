@@ -13,7 +13,7 @@ const currencyFormatter = new Intl.NumberFormat('en-IN', {
 });
 
 const DashboardAdminOverview = () => {
-  const [data, setData] = useState({ profit: null, openSessions: [], users: [] });
+  const [data, setData] = useState({ profit: null, openSessions: [], users: [], tanks: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -22,16 +22,18 @@ const DashboardAdminOverview = () => {
     setError('');
 
     try {
-      const [profitResponse, openSessionsResponse, usersResponse] = await Promise.all([
+      const [profitResponse, openSessionsResponse, usersResponse, tanksResponse] = await Promise.all([
         api.get('/reports/profit'),
         api.get('/unit-session?status=open'),
         api.get('/users'),
+        api.get('/tanks'),
       ]);
 
       setData({
         profit: profitResponse.data,
         openSessions: openSessionsResponse.data,
         users: usersResponse.data,
+        tanks: tanksResponse.data,
       });
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Failed to load dashboard overview');
@@ -71,6 +73,23 @@ const DashboardAdminOverview = () => {
     [data.users]
   );
 
+  const tanksWithFill = useMemo(
+    () =>
+      data.tanks.map((tank) => {
+        const capacity = Number(tank.capacity || 0);
+        const currentLevel = Number(tank.currentLevel || 0);
+        const fillPercent = capacity > 0 ? Math.max(0, Math.min(100, (currentLevel / capacity) * 100)) : 0;
+
+        return {
+          ...tank,
+          fillPercent,
+          capacity,
+          currentLevel,
+        };
+      }),
+    [data.tanks]
+  );
+
   return (
     <Layout title="Dashboard" subtitle="Quick snapshot of financials and open sessions.">
       {loading ? <div className="page-state">Loading dashboard...</div> : null}
@@ -87,6 +106,31 @@ const DashboardAdminOverview = () => {
                 <div key={metric.label} className="metric-card">
                   <span>{metric.label}</span>
                   <strong>{metric.value}</strong>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Tank Fuel Levels"
+            description="Live stock markers by tank, based on current stock versus capacity."
+          >
+            <div className="tank-marker-grid">
+              {tanksWithFill.map((tank) => (
+                <div key={tank._id} className="tank-marker-card">
+                  <div className="tank-marker-header">
+                    <strong>{tank.fuelType?.name || 'Fuel'}</strong>
+                    <span>{tank.fillPercent.toFixed(0)}%</span>
+                  </div>
+                  <div className="tank-marker-body">
+                    <div className="tank-tube" role="img" aria-label="Tank fill level marker">
+                      <div className="tank-tube-fill" style={{ height: `${tank.fillPercent}%` }} />
+                    </div>
+                    <div className="tank-marker-values">
+                      <span>Stock: {tank.currentLevel}</span>
+                      <span>Capacity: {tank.capacity}</span>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
