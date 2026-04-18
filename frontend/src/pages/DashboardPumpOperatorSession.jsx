@@ -13,16 +13,28 @@ const buildOpeningRows = (unit) =>
     reading: '',
   }));
 
-const buildClosingRows = (session) =>
-  (session?.openingReadings || []).map((item) => ({
-    nozzleId: item.nozzle?._id || item.nozzle,
-    nozzleNumber: item.nozzle?.nozzleNumber || 'Nozzle',
-    openingReading: item.reading,
-    closingReading: '',
-  }));
+const buildClosingRows = (session) => {
+  const openingReadings = session?.openingReadings || [];
+  const closingByNozzleId = new Map(
+    (session?.closingReadings || []).map((item) => [item.nozzle?._id || item.nozzle, item])
+  );
+
+  return openingReadings.map((item) => {
+    const savedClosing = closingByNozzleId.get(item.nozzle?._id || item.nozzle);
+
+    return {
+      nozzleId: item.nozzle?._id || item.nozzle,
+      nozzleNumber: item.nozzle?.nozzleNumber || 'Nozzle',
+      openingReading: item.reading,
+      closingReading: savedClosing?.reading ?? '',
+    };
+  });
+};
+
+const getFuelTypeIdFromNozzle = (nozzle) => nozzle?.tank?.fuelType?._id || nozzle?.tank?.fuelType?.id || '';
 
 const DashboardPumpOperatorSession = () => {
-  const [data, setData] = useState({ units: [], currentSession: null, customers: [] });
+  const [data, setData] = useState({ units: [], currentSession: null, customers: [], fuelPrices: [] });
   const [selectedUnitId, setSelectedUnitId] = useState('');
   const [openingRows, setOpeningRows] = useState([]);
   const [closingRows, setClosingRows] = useState([]);
@@ -30,6 +42,7 @@ const DashboardPumpOperatorSession = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [readingsRecorded, setReadingsRecorded] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [reconciliation, setReconciliation] = useState(null);
   const [sessionPayment, setSessionPayment] = useState(null);
@@ -52,31 +65,51 @@ const DashboardPumpOperatorSession = () => {
     setError('');
 
     try {
-      const [unitsResponse, currentSessionResponse, customersResponse] = await Promise.all([
+      const [unitsResponse, currentSessionResponse, customersResponse, fuelPricesResponse] = await Promise.all([
         api.get('/units'),
         api.get('/unit-session/current'),
         api.get('/customers?isActive=true'),
+        api.get('/fuel-prices/current'),
       ]);
 
       setData({
         units: unitsResponse.data,
         currentSession: currentSessionResponse.data,
         customers: customersResponse.data,
+        fuelPrices: fuelPricesResponse.data,
       });
 
-      // Load credit sales if session exists
+      const currentSession = currentSessionResponse.data;
+      let creditSalesData = [];
       if (currentSessionResponse.data?._id) {
         const creditSalesResponse = await api.get(
           `/credit-sales/session/${currentSessionResponse.data._id}`
         );
-        setCreditSales(creditSalesResponse.data);
-
-        // Load reconciliation data
-        const reconciliationResponse = await api.get(
-          `/session-payments/${currentSessionResponse.data._id}/reconciliation`
-        );
-        setReconciliation(reconciliationResponse.data);
+        creditSalesData = creditSalesResponse.data;
       }
+
+      setCreditSales(creditSalesData);
+
+      if (currentSession?.closingReadings?.length) {
+        const totalSales = currentSession.closingReadings.reduce(
+          (sum, reading) => sum + Number(reading.totalAmount || 0),
+          0
+        );
+        const creditSalesTotal = creditSalesData.reduce(
+          (sum, sale) => sum + Number(sale.totalAmount || 0),
+          0
+        );
+
+        setReconciliation({
+          totalSales,
+          creditSalesTotal,
+          expectedCollection: totalSales - creditSalesTotal,
+        });
+      } else {
+        setReconciliation(null);
+      }
+
+      setReadingsRecorded(Boolean(currentSession?.closingReadings?.length));
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Failed to load session data');
     } finally {
@@ -92,6 +125,7 @@ const DashboardPumpOperatorSession = () => {
     if (data.currentSession) {
       setSelectedUnitId(data.currentSession.unit?._id || '');
       setClosingRows(buildClosingRows(data.currentSession));
+      setReadingsRecorded(Boolean(data.currentSession.closingReadings?.length));
       setOpeningRows([]);
       return;
     }
@@ -99,6 +133,7 @@ const DashboardPumpOperatorSession = () => {
     const selectedUnit = data.units.find((unit) => unit._id === selectedUnitId);
     setOpeningRows(selectedUnit ? buildOpeningRows(selectedUnit) : []);
     setClosingRows([]);
+    setReadingsRecorded(false);
   }, [data.currentSession, data.units, selectedUnitId]);
 
   const selectedUnit = useMemo(
@@ -128,6 +163,24 @@ const DashboardPumpOperatorSession = () => {
     );
   };
 
+  const getCurrentPriceForNozzle = (nozzleId) => {
+    const unitNozzle = (selectedUnit?.nozzles || data.currentSession?.unit?.nozzles || []).find(
+      (nozzle) => nozzle._id === nozzleId
+    );
+
+    if (!unitNozzle) {
+      return '';
+    }
+
+    const fuelTypeId = getFuelTypeIdFromNozzle(unitNozzle);
+    if (!fuelTypeId) {
+      return '';
+    }
+
+    const fuelPrice = data.fuelPrices.find((item) => item.fuelType?._id === fuelTypeId);
+    return fuelPrice?.pricePerLitre ?? '';
+  };
+
   const handleSelectUnit = (unit) => {
     if (data.currentSession || unit.status !== 'available') {
       return;
@@ -137,6 +190,16 @@ const DashboardPumpOperatorSession = () => {
     setOpeningRows(buildOpeningRows(unit));
     setMessage('');
     setError('');
+  };
+
+  const handleCreditSaleNozzleChange = (nozzleId) => {
+    const defaultPrice = getCurrentPriceForNozzle(nozzleId);
+
+    setCreditSaleForm((current) => ({
+      ...current,
+      nozzleId,
+      pricePerLitre: defaultPrice === '' ? '' : String(defaultPrice),
+    }));
   };
 
   const handleStartSession = async (event) => {
@@ -189,10 +252,89 @@ const DashboardPumpOperatorSession = () => {
       setMessage('Credit sale recorded successfully.');
       setCreditSaleForm({ customerId: '', nozzleId: '', litres: '', pricePerLitre: '' });
       setIsModalOpen(false);
+      setReconciliation(null);
       await loadSession();
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Unable to record credit sale');
     }
+  };
+
+  const handleRecordReadings = () => {
+    const unitNozzles = selectedUnit?.nozzles || data.currentSession?.unit?.nozzles || [];
+
+    if (!closingRows.length) {
+      setError('No closing readings found for this session.');
+      return;
+    }
+
+    const missingReading = closingRows.some(
+      (row) => row.closingReading === '' || row.closingReading === null || row.closingReading === undefined
+    );
+
+    if (missingReading) {
+      setError('Please enter closing reading for all nozzles before recording readings.');
+      return;
+    }
+
+    let totalSales = 0;
+
+    for (const row of closingRows) {
+      const opening = Number(row.openingReading || 0);
+      const closing = Number(row.closingReading);
+
+      if (!Number.isFinite(closing) || closing < 0) {
+        setError(`Closing reading for ${row.nozzleNumber} must be zero or greater.`);
+        return;
+      }
+
+      if (closing < opening) {
+        setError(`Closing reading for ${row.nozzleNumber} cannot be less than opening reading.`);
+        return;
+      }
+
+      const nozzle = unitNozzles.find((item) => item._id === row.nozzleId);
+      const fuelTypeId = getFuelTypeIdFromNozzle(nozzle);
+      const fuelPrice = data.fuelPrices.find((item) => item.fuelType?._id === fuelTypeId);
+      const pricePerLitre = Number(fuelPrice?.pricePerLitre);
+
+      if (!Number.isFinite(pricePerLitre) || pricePerLitre <= 0) {
+        setError(`Daily fuel price is not configured for ${nozzle?.tank?.fuelType?.name || row.nozzleNumber}.`);
+        return;
+      }
+
+      const litresSold = closing - opening;
+      totalSales += litresSold * pricePerLitre;
+    }
+
+    const creditSalesTotal = creditSales.reduce(
+      (sum, sale) => sum + Number(sale.totalAmount || 0),
+      0
+    );
+    const expectedCollection = totalSales - creditSalesTotal;
+
+    const persistReadings = async () => {
+      await api.post('/unit-session/record-readings', {
+        sessionId: data.currentSession._id,
+        closingReadings: closingRows.map((row) => ({
+          nozzleId: row.nozzleId,
+          reading: row.closingReading,
+        })),
+      });
+
+      setError('');
+      setReconciliation({
+        totalSales,
+        creditSalesTotal,
+        expectedCollection,
+      });
+      setReadingsRecorded(true);
+      setMessage('Readings recorded and saved to the database.');
+      await loadSession();
+    };
+
+    persistReadings().catch((requestError) => {
+      setError(requestError.response?.data?.message || 'Unable to record readings');
+    });
   };
 
   const handleEndSession = async (event) => {
@@ -209,10 +351,6 @@ const DashboardPumpOperatorSession = () => {
     try {
       await api.post('/unit-session/end', {
         sessionId: data.currentSession._id,
-        closingReadings: closingRows.map((row) => ({
-          nozzleId: row.nozzleId,
-          reading: row.closingReading,
-        })),
       });
 
       setMessage('Unit session closed successfully.');
@@ -228,6 +366,11 @@ const DashboardPumpOperatorSession = () => {
   };
 
   const handleSubmitPayment = async () => {
+    if (!readingsRecorded) {
+      setError('Record readings before saving payment.');
+      return;
+    }
+
     const cashCollected = paymentForm.cash;
     const upiCollected = paymentForm.upi;
     const cardCollected = paymentForm.card;
@@ -406,9 +549,7 @@ const DashboardPumpOperatorSession = () => {
                           <span>Nozzle</span>
                           <select
                             value={creditSaleForm.nozzleId}
-                            onChange={(e) =>
-                              setCreditSaleForm({ ...creditSaleForm, nozzleId: e.target.value })
-                            }
+                            onChange={(e) => handleCreditSaleNozzleChange(e.target.value)}
                             required
                           >
                             <option value="">Select nozzle</option>
@@ -595,7 +736,12 @@ const DashboardPumpOperatorSession = () => {
                       ) : null}
 
                       <div className="form-actions">
-                        <button type="button" className="primary-button" onClick={handleSubmitPayment}>
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={handleSubmitPayment}
+                          disabled={!readingsRecorded}
+                        >
                           Record Payment
                         </button>
                       </div>
@@ -604,7 +750,10 @@ const DashboardPumpOperatorSession = () => {
                 ) : null}
 
                 <div className="form-actions">
-                  <button type="submit" className="danger-button">
+                  <button type="button" className="primary-button" onClick={handleRecordReadings}>
+                    Record Reading
+                  </button>
+                  <button type="submit" className="danger-button" disabled={!readingsRecorded}>
                     End Unit Session
                   </button>
                 </div>

@@ -1,5 +1,6 @@
 import asyncHandler from '../utils/asyncHandler.js';
 import {
+  recordUnitSessionReadings,
   endUnitSession,
   getCurrentUnitSessionForUser,
   getUnitSessions,
@@ -22,6 +23,24 @@ export const startSession = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json(unitSession);
+});
+
+export const recordReadings = asyncHandler(async (req, res) => {
+  const { sessionId, closingReadings } = req.body;
+
+  if (!sessionId) {
+    const error = new Error('Session identifier is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const unitSession = await recordUnitSessionReadings({
+    sessionId,
+    closingReadings,
+    actingUser: req.user,
+  });
+
+  res.json(unitSession);
 });
 
 export const endSession = asyncHandler(async (req, res) => {

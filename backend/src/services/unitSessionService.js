@@ -5,7 +5,7 @@ import {
   getUnitSessionById,
   listUnitSessions,
 } from './dataService.js';
-import { decreaseTankLevel } from './stockService.js';
+import { decreaseTankLevel, increaseTankLevel } from './stockService.js';
 
 const toIdString = (value) => (value === null || value === undefined ? null : value.toString());
 
@@ -117,6 +117,111 @@ const loadActiveUnitNozzles = async (db, unitId) => {
   return rows;
 };
 
+const loadSessionClosingRows = async (db, sessionId) => {
+  const { rows } = await db.query(
+    `
+      SELECT
+        r.nozzle_id AS "nozzleId",
+        r.opening_reading AS "openingReading",
+        r.closing_reading AS "closingReading",
+        n.nozzle_number AS "nozzleNumber",
+        n.tank_id AS "tankId",
+        ft.id AS "fuelTypeId",
+        ft.name AS "fuelTypeName"
+      FROM unit_session_nozzle_readings r
+      JOIN nozzles n ON n.id = r.nozzle_id
+      JOIN tanks t ON t.id = n.tank_id
+      JOIN fuel_types ft ON ft.id = t.fuel_type_id
+      WHERE r.unit_session_id = $1
+      ORDER BY n.nozzle_number ASC
+    `,
+    [sessionId]
+  );
+
+  return rows;
+};
+
+const persistClosingReadings = async (tx, sessionId, readingRows, closingMap, timestamp) => {
+  ensureCoverage(
+    closingMap,
+    readingRows.map((row) => row.nozzleId),
+    'Closing readings must be provided once for every nozzle opened in the session'
+  );
+
+  for (const row of readingRows) {
+    const openingReading = normalizeNumeric(row.openingReading) ?? 0;
+    const previousClosingReading = normalizeNumeric(row.closingReading);
+    const closing = closingMap.get(row.nozzleId);
+    const nextClosingReading = closing.reading;
+    const nextLitresSold = nextClosingReading - openingReading;
+
+    if (nextLitresSold < 0) {
+      throw createHttpError(
+        `Closing reading cannot be less than opening reading for nozzle ${row.nozzleNumber}`,
+        400
+      );
+    }
+
+    const previousLitresSold = Number.isFinite(previousClosingReading)
+      ? previousClosingReading - openingReading
+      : 0;
+    const litresDelta = nextLitresSold - previousLitresSold;
+
+    if (litresDelta > 0) {
+      await decreaseTankLevel(row.tankId, litresDelta, { client: tx });
+    } else if (litresDelta < 0) {
+      await increaseTankLevel(row.tankId, Math.abs(litresDelta), { client: tx });
+    }
+
+    const { rows: priceRows } = await tx.query(
+      `
+        SELECT price_per_litre AS "pricePerLitre"
+        FROM daily_fuel_prices
+        WHERE fuel_type_id = $1
+          AND price_date <= $2::date
+        ORDER BY price_date DESC, created_at DESC
+        LIMIT 1
+      `,
+      [row.fuelTypeId, timestamp]
+    );
+
+    const pricePerLitre = normalizeNumeric(priceRows[0]?.pricePerLitre);
+
+    if (!Number.isFinite(pricePerLitre) || pricePerLitre <= 0) {
+      throw createHttpError(
+        `Daily fuel price is not configured for ${row.fuelTypeName} on ${timestamp.toISOString().slice(0, 10)}`,
+        400
+      );
+    }
+
+    const totalAmount = nextLitresSold * pricePerLitre;
+
+    await tx.query(
+      `
+        UPDATE unit_session_nozzle_readings
+        SET
+          closing_reading = $3,
+          price_per_litre = $4,
+          litres_sold = $5,
+          total_amount = $6,
+          closed_at = $7,
+          updated_at = NOW()
+        WHERE unit_session_id = $1 AND nozzle_id = $2
+      `,
+      [sessionId, row.nozzleId, nextClosingReading, pricePerLitre, nextLitresSold, totalAmount, timestamp]
+    );
+
+    await tx.query(
+      `
+        UPDATE nozzles
+        SET latest_reading = $2, latest_reading_updated_at = $3, updated_at = NOW()
+        WHERE id = $1
+      `,
+      [row.nozzleId, nextClosingReading, timestamp]
+    );
+  }
+};
+
 export const startUnitSession = async ({ unitId, pumpOperatorId, openingReadings }) => {
   const db = getDb();
   const openingMap = buildReadingMap(openingReadings);
@@ -219,6 +324,54 @@ export const startUnitSession = async ({ unitId, pumpOperatorId, openingReadings
   return getUnitSessionById(db, sessionId);
 };
 
+export const recordUnitSessionReadings = async ({ sessionId, closingReadings, actingUser }) => {
+  const db = getDb();
+  const closingMap = buildReadingMap(closingReadings);
+
+  await withTransaction(async (tx) => {
+    const { rows: sessionRows } = await tx.query(
+      `
+        SELECT
+          id,
+          unit_id AS "unitId",
+          pump_operator_id AS "pumpOperatorId",
+          status
+        FROM unit_sessions
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [sessionId]
+    );
+
+    const session = sessionRows[0];
+
+    if (!session || session.status !== 'open') {
+      throw createHttpError('Open unit session not found', 404);
+    }
+
+    const isOwner = session.pumpOperatorId === actingUser._id;
+    if (!isOwner && actingUser.role !== 'admin') {
+      throw createHttpError('You are not allowed to update this unit session', 403);
+    }
+
+    const unit = await loadUnitForUpdate(tx, session.unitId);
+
+    if (!unit || unit.isActive === false || unit.status !== 'occupied') {
+      throw createHttpError('Unit lock is no longer valid for this session', 400);
+    }
+
+    const readingRows = await loadSessionClosingRows(tx, sessionId);
+
+    if (!readingRows.length) {
+      throw createHttpError('The selected session does not have any nozzles', 400);
+    }
+
+    await persistClosingReadings(tx, sessionId, readingRows, closingMap, new Date());
+  });
+
+  return getUnitSessionById(db, sessionId);
+};
+
 export const endUnitSession = async ({
   sessionId,
   closingReadings,
@@ -227,7 +380,6 @@ export const endUnitSession = async ({
   closeReason = '',
 }) => {
   const db = getDb();
-  const closingMap = buildReadingMap(closingReadings);
 
   await withTransaction(async (tx) => {
     const { rows: sessionRows } = await tx.query(
@@ -261,116 +413,18 @@ export const endUnitSession = async ({
       throw createHttpError('Unit lock is no longer valid for this session', 400);
     }
 
-    const { rows: readingRows } = await tx.query(
-      `
-        SELECT
-          r.nozzle_id AS "nozzleId",
-          r.opening_reading AS "openingReading",
-          n.nozzle_number AS "nozzleNumber",
-          n.tank_id AS "tankId",
-          ft.id AS "fuelTypeId",
-          ft.name AS "fuelTypeName"
-        FROM unit_session_nozzle_readings r
-        JOIN nozzles n ON n.id = r.nozzle_id
-        JOIN tanks t ON t.id = n.tank_id
-        JOIN fuel_types ft ON ft.id = t.fuel_type_id
-        WHERE r.unit_session_id = $1
-        ORDER BY n.nozzle_number ASC
-      `,
-      [sessionId]
-    );
-
-    ensureCoverage(
-      closingMap,
-      readingRows.map((row) => row.nozzleId),
-      'Closing readings must be provided once for every nozzle opened in the session'
-    );
-
     const timestamp = new Date();
-    const fuelTypeIds = [...new Set(readingRows.map((row) => row.fuelTypeId))];
+    const readingRows = await loadSessionClosingRows(tx, sessionId);
 
-    const { rows: effectivePriceRows } = await tx.query(
-      `
-        SELECT
-          ft.id AS "fuelTypeId",
-          p.price_per_litre AS "pricePerLitre"
-        FROM fuel_types ft
-        LEFT JOIN LATERAL (
-          SELECT price_per_litre
-          FROM daily_fuel_prices dp
-          WHERE dp.fuel_type_id = ft.id
-            AND dp.price_date <= $2::date
-          ORDER BY dp.price_date DESC, dp.created_at DESC
-          LIMIT 1
-        ) p ON TRUE
-        WHERE ft.id = ANY($1::uuid[])
-      `,
-      [fuelTypeIds, timestamp]
-    );
+    if (!readingRows.length) {
+      throw createHttpError('The selected session does not have any nozzles', 400);
+    }
 
-    const priceByFuelTypeId = new Map(
-      effectivePriceRows.map((row) => [
-        row.fuelTypeId,
-        normalizeNumeric(row.pricePerLitre),
-      ])
-    );
-
-    for (const row of readingRows) {
-      const openingReading = normalizeNumeric(row.openingReading) ?? 0;
-      const closing = closingMap.get(row.nozzleId);
-      const litresSold = closing.reading - openingReading;
-
-      if (litresSold < 0) {
-        throw createHttpError(
-          `Closing reading cannot be less than opening reading for nozzle ${row.nozzleNumber}`,
-          400
-        );
-      }
-
-      const pricePerLitre = priceByFuelTypeId.get(row.fuelTypeId);
-
-      if (!Number.isFinite(pricePerLitre) || pricePerLitre <= 0) {
-        throw createHttpError(
-          `Daily fuel price is not configured for ${row.fuelTypeName} on ${timestamp.toISOString().slice(0, 10)}`,
-          400
-        );
-      }
-
-      const totalAmount = litresSold * pricePerLitre;
-
-      await decreaseTankLevel(row.tankId, litresSold, { client: tx });
-
-      await tx.query(
-        `
-          UPDATE unit_session_nozzle_readings
-          SET
-            closing_reading = $3,
-            price_per_litre = $4,
-            litres_sold = $5,
-            total_amount = $6,
-            closed_at = $7,
-            updated_at = NOW()
-          WHERE unit_session_id = $1 AND nozzle_id = $2
-        `,
-        [
-          sessionId,
-          row.nozzleId,
-          closing.reading,
-          pricePerLitre,
-          litresSold,
-          totalAmount,
-          timestamp,
-        ]
-      );
-
-      await tx.query(
-        `
-          UPDATE nozzles
-          SET latest_reading = $2, latest_reading_updated_at = $3, updated_at = NOW()
-          WHERE id = $1
-        `,
-        [row.nozzleId, closing.reading, timestamp]
-      );
+    if (Array.isArray(closingReadings) && closingReadings.length > 0) {
+      const closingMap = buildReadingMap(closingReadings);
+      await persistClosingReadings(tx, sessionId, readingRows, closingMap, timestamp);
+    } else if (readingRows.some((row) => row.closingReading === null)) {
+      throw createHttpError('Record closing readings before ending the unit session', 400);
     }
 
     await tx.query(

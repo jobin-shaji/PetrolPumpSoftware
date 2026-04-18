@@ -4,6 +4,14 @@ import { getSessionCreditTotal } from './creditSaleService.js';
 
 export const calculateSessionPaymentReconciliation = async (sessionId, closingReadings) => {
   const db = getDb();
+  const closingReadingMap = Array.isArray(closingReadings) && closingReadings.length
+    ? new Map(
+        closingReadings.map((reading) => [
+          reading.nozzleId?.toString?.() || reading.nozzleId,
+          normalizeNumeric(reading.reading),
+        ])
+      )
+    : null;
 
   // Get session readings
   const { rows: readingRows } = await db.query(
@@ -26,11 +34,60 @@ export const calculateSessionPaymentReconciliation = async (sessionId, closingRe
     [sessionId]
   );
 
+  const readingIds = readingRows.map((row) => row.nozzle_id);
+
+  if (closingReadingMap && readingIds.some((nozzleId) => !closingReadingMap.has(nozzleId))) {
+    throw createHttpError('Closing readings are required for every nozzle in the session', 400);
+  }
+
+  const { rows: priceRows } = await db.query(
+    `
+      SELECT
+        ft.id AS "fuelTypeId",
+        p.price_per_litre AS "pricePerLitre"
+      FROM fuel_types ft
+      LEFT JOIN LATERAL (
+        SELECT price_per_litre
+        FROM daily_fuel_prices dp
+        WHERE dp.fuel_type_id = ft.id
+          AND dp.price_date <= CURRENT_DATE
+        ORDER BY dp.price_date DESC, dp.created_at DESC
+        LIMIT 1
+      ) p ON TRUE
+      WHERE ft.id = ANY($1::uuid[])
+    `,
+    [readingRows.map((row) => row.fuel_type_id)]
+  );
+
+  const priceByFuelTypeId = new Map(
+    priceRows.map((row) => [row.fuelTypeId, normalizeNumeric(row.pricePerLitre)])
+  );
+
   // Calculate total sales from all nozzles
   let totalSales = 0;
   for (const reading of readingRows) {
-    const totalAmount = normalizeNumeric(reading.total_amount) ?? 0;
-    totalSales += totalAmount;
+    const nozzleId = reading.nozzle_id.toString();
+    const openingReading = normalizeNumeric(reading.opening_reading) ?? 0;
+    const closingReading = closingReadingMap
+      ? closingReadingMap.get(nozzleId)
+      : normalizeNumeric(reading.closing_reading);
+
+    if (!Number.isFinite(closingReading)) {
+      throw createHttpError('Closing readings are required for every nozzle in the session', 400);
+    }
+
+    if (closingReading < openingReading) {
+      throw createHttpError('Closing reading cannot be less than opening reading', 400);
+    }
+
+    const litresSold = closingReading - openingReading;
+    const pricePerLitre = priceByFuelTypeId.get(reading.fuel_type_id);
+
+    if (!Number.isFinite(pricePerLitre) || pricePerLitre <= 0) {
+      throw createHttpError('Daily fuel price is not configured for one or more fuels', 400);
+    }
+
+    totalSales += litresSold * pricePerLitre;
   }
 
   // Get credit sales total
@@ -47,7 +104,7 @@ export const calculateSessionPaymentReconciliation = async (sessionId, closingRe
 };
 
 export const saveSessionPayment = async (sessionId, paymentData) => {
-  const { cashCollected, upiCollected, cardCollected } = paymentData;
+  const { cashCollected, upiCollected, cardCollected, closingReadings } = paymentData;
 
   const cashNum = normalizeNumeric(cashCollected) ?? 0;
   const upiNum = normalizeNumeric(upiCollected) ?? 0;
@@ -59,7 +116,7 @@ export const saveSessionPayment = async (sessionId, paymentData) => {
 
   return withTransaction(async (tx) => {
     // Get reconciliation data
-    const reconciliation = await calculateSessionPaymentReconciliation(sessionId, null);
+    const reconciliation = await calculateSessionPaymentReconciliation(sessionId, closingReadings);
 
     const totalCollected = cashNum + upiNum + cardNum;
     const difference = totalCollected - reconciliation.expectedCollection;

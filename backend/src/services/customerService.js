@@ -1,6 +1,8 @@
 import { getDb, withTransaction } from '../config/db.js';
 import { createHttpError, normalizeNumeric } from '../db/helpers.js';
 
+const DEFAULT_CUSTOMER_CREDIT_LIMIT = 10000;
+
 export const listCustomers = async (filters = {}) => {
   const db = getDb();
   const { isActive = true, searchTerm = '' } = filters;
@@ -44,7 +46,7 @@ export const createCustomer = async (data) => {
     throw createHttpError('Customer name is required', 400);
   }
 
-  const creditLimitNum = normalizeNumeric(creditLimit) ?? 0;
+  const creditLimitNum = normalizeNumeric(creditLimit) ?? DEFAULT_CUSTOMER_CREDIT_LIMIT;
   if (creditLimitNum < 0) {
     throw createHttpError('Credit limit cannot be negative', 400);
   }

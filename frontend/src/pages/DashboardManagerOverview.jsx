@@ -39,7 +39,7 @@ const getTodayPriceReminder = (fuelPrices) => {
 const DashboardManagerOverview = () => {
   const [data, setData] = useState({ units: [], tanks: [], shifts: [], fuelPrices: [], customers: [] });
   const [fuelPriceForm, setFuelPriceForm] = useState({ fuelTypeId: "", pricePerLitre: "" });
-  const [customerForm, setCustomerForm] = useState({ name: "", phone: "", vehicleNumber: "", creditLimit: "" });
+  const [customerForm, setCustomerForm] = useState({ name: "", phone: "", vehicleNumber: "", creditLimit: "10000" });
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [editingCustomerId, setEditingCustomerId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -158,7 +158,7 @@ const DashboardManagerOverview = () => {
         await api.post("/customers", customerForm);
         setMessage("Customer added successfully.");
       }
-      setCustomerForm({ name: "", phone: "", vehicleNumber: "", creditLimit: "" });
+      setCustomerForm({ name: "", phone: "", vehicleNumber: "", creditLimit: "10000" });
       setIsCustomerModalOpen(false);
       await loadOverview();
     } catch (requestError) {
@@ -180,7 +180,13 @@ const DashboardManagerOverview = () => {
   const handleCloseCustomerModal = () => {
     setIsCustomerModalOpen(false);
     setEditingCustomerId(null);
-    setCustomerForm({ name: "", phone: "", vehicleNumber: "", creditLimit: "" });
+    setCustomerForm({ name: "", phone: "", vehicleNumber: "", creditLimit: "10000" });
+  };
+
+  const handleOpenCreateCustomer = () => {
+    setEditingCustomerId(null);
+    setCustomerForm({ name: "", phone: "", vehicleNumber: "", creditLimit: "10000" });
+    setIsCustomerModalOpen(true);
   };
 
   return (
@@ -338,7 +344,7 @@ const DashboardManagerOverview = () => {
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => setIsCustomerModalOpen(true)}
+                onClick={handleOpenCreateCustomer}
               >
                 Add Customer
               </button>
