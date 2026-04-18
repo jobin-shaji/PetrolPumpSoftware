@@ -227,7 +227,7 @@ export const endUnitSession = async ({
   closeReason = '',
 }) => {
   const db = getDb();
-  const closingMap = buildReadingMap(closingReadings, { requirePrice: true });
+  const closingMap = buildReadingMap(closingReadings);
 
   await withTransaction(async (tx) => {
     const { rows: sessionRows } = await tx.query(
@@ -267,9 +267,13 @@ export const endUnitSession = async ({
           r.nozzle_id AS "nozzleId",
           r.opening_reading AS "openingReading",
           n.nozzle_number AS "nozzleNumber",
-          n.tank_id AS "tankId"
+          n.tank_id AS "tankId",
+          ft.id AS "fuelTypeId",
+          ft.name AS "fuelTypeName"
         FROM unit_session_nozzle_readings r
         JOIN nozzles n ON n.id = r.nozzle_id
+        JOIN tanks t ON t.id = n.tank_id
+        JOIN fuel_types ft ON ft.id = t.fuel_type_id
         WHERE r.unit_session_id = $1
         ORDER BY n.nozzle_number ASC
       `,
@@ -283,6 +287,33 @@ export const endUnitSession = async ({
     );
 
     const timestamp = new Date();
+    const fuelTypeIds = [...new Set(readingRows.map((row) => row.fuelTypeId))];
+
+    const { rows: effectivePriceRows } = await tx.query(
+      `
+        SELECT
+          ft.id AS "fuelTypeId",
+          p.price_per_litre AS "pricePerLitre"
+        FROM fuel_types ft
+        LEFT JOIN LATERAL (
+          SELECT price_per_litre
+          FROM daily_fuel_prices dp
+          WHERE dp.fuel_type_id = ft.id
+            AND dp.price_date <= $2::date
+          ORDER BY dp.price_date DESC, dp.created_at DESC
+          LIMIT 1
+        ) p ON TRUE
+        WHERE ft.id = ANY($1::uuid[])
+      `,
+      [fuelTypeIds, timestamp]
+    );
+
+    const priceByFuelTypeId = new Map(
+      effectivePriceRows.map((row) => [
+        row.fuelTypeId,
+        normalizeNumeric(row.pricePerLitre),
+      ])
+    );
 
     for (const row of readingRows) {
       const openingReading = normalizeNumeric(row.openingReading) ?? 0;
@@ -296,7 +327,16 @@ export const endUnitSession = async ({
         );
       }
 
-      const totalAmount = litresSold * closing.pricePerLitre;
+      const pricePerLitre = priceByFuelTypeId.get(row.fuelTypeId);
+
+      if (!Number.isFinite(pricePerLitre) || pricePerLitre <= 0) {
+        throw createHttpError(
+          `Daily fuel price is not configured for ${row.fuelTypeName} on ${timestamp.toISOString().slice(0, 10)}`,
+          400
+        );
+      }
+
+      const totalAmount = litresSold * pricePerLitre;
 
       await decreaseTankLevel(row.tankId, litresSold, { client: tx });
 
@@ -316,7 +356,7 @@ export const endUnitSession = async ({
           sessionId,
           row.nozzleId,
           closing.reading,
-          closing.pricePerLitre,
+          pricePerLitre,
           litresSold,
           totalAmount,
           timestamp,

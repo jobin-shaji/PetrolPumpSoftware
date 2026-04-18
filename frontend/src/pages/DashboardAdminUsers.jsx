@@ -9,6 +9,7 @@ import { getRoleLabel } from '../utils/roles.js';
 
 const DashboardAdminUsers = () => {
   const [users, setUsers] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [employeeActionError, setEmployeeActionError] = useState('');
@@ -19,10 +20,15 @@ const DashboardAdminUsers = () => {
     setError('');
 
     try {
-      const response = await api.get('/users');
-      setUsers(response.data);
+      const [usersResponse, customersResponse] = await Promise.all([
+        api.get('/users'),
+        api.get('/customers'),
+      ]);
+
+      setUsers(usersResponse.data);
+      setCustomers(customersResponse.data);
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'Failed to load users');
+      setError(requestError.response?.data?.message || 'Failed to load users and customers');
     } finally {
       setLoading(false);
     }
@@ -134,6 +140,45 @@ const DashboardAdminUsers = () => {
                   key: 'role',
                   label: 'Role',
                   render: (row) => getRoleLabel(row.role),
+                },
+              ]}
+            />
+          </SectionCard>
+
+          <SectionCard
+            title="Customers"
+            description="Credit customers available for exception-based sales."
+          >
+            <DataTable
+              rows={customers}
+              emptyMessage="No customers found."
+              columns={[
+                { key: 'name', label: 'Name' },
+                { key: 'phone', label: 'Phone', render: (row) => row.phone || '-' },
+                {
+                  key: 'vehicleNumber',
+                  label: 'Vehicle',
+                  render: (row) => row.vehicleNumber || '-',
+                },
+                {
+                  key: 'creditLimit',
+                  label: 'Credit Limit',
+                  render: (row) =>
+                    new Intl.NumberFormat('en-IN', {
+                      style: 'currency',
+                      currency: 'INR',
+                      maximumFractionDigits: 2,
+                    }).format(row.creditLimit || 0),
+                },
+                {
+                  key: 'currentBalance',
+                  label: 'Balance',
+                  render: (row) =>
+                    new Intl.NumberFormat('en-IN', {
+                      style: 'currency',
+                      currency: 'INR',
+                      maximumFractionDigits: 2,
+                    }).format(row.currentBalance || 0),
                 },
               ]}
             />

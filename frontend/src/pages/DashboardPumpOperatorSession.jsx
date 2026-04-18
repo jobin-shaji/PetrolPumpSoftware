@@ -19,32 +19,64 @@ const buildClosingRows = (session) =>
     nozzleNumber: item.nozzle?.nozzleNumber || 'Nozzle',
     openingReading: item.reading,
     closingReading: '',
-    pricePerLitre: '',
   }));
 
 const DashboardPumpOperatorSession = () => {
-  const [data, setData] = useState({ units: [], currentSession: null });
+  const [data, setData] = useState({ units: [], currentSession: null, customers: [] });
   const [selectedUnitId, setSelectedUnitId] = useState('');
   const [openingRows, setOpeningRows] = useState([]);
   const [closingRows, setClosingRows] = useState([]);
+  const [creditSales, setCreditSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [reconciliation, setReconciliation] = useState(null);
+  const [sessionPayment, setSessionPayment] = useState(null);
+  const [paymentForm, setPaymentForm] = useState({
+    cash: '0',
+    upi: '0',
+    card: '0',
+  });
+
+  // Credit sale form state
+  const [creditSaleForm, setCreditSaleForm] = useState({
+    customerId: '',
+    nozzleId: '',
+    litres: '',
+    pricePerLitre: '',
+  });
 
   const loadSession = async () => {
     setLoading(true);
     setError('');
 
     try {
-      const [unitsResponse, currentSessionResponse] = await Promise.all([
+      const [unitsResponse, currentSessionResponse, customersResponse] = await Promise.all([
         api.get('/units'),
         api.get('/unit-session/current'),
+        api.get('/customers?isActive=true'),
       ]);
 
       setData({
         units: unitsResponse.data,
         currentSession: currentSessionResponse.data,
+        customers: customersResponse.data,
       });
+
+      // Load credit sales if session exists
+      if (currentSessionResponse.data?._id) {
+        const creditSalesResponse = await api.get(
+          `/credit-sales/session/${currentSessionResponse.data._id}`
+        );
+        setCreditSales(creditSalesResponse.data);
+
+        // Load reconciliation data
+        const reconciliationResponse = await api.get(
+          `/session-payments/${currentSessionResponse.data._id}/reconciliation`
+        );
+        setReconciliation(reconciliationResponse.data);
+      }
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Failed to load session data');
     } finally {
@@ -72,6 +104,16 @@ const DashboardPumpOperatorSession = () => {
   const selectedUnit = useMemo(
     () => data.units.find((unit) => unit._id === selectedUnitId),
     [data.units, selectedUnitId]
+  );
+
+  const metrics = useMemo(
+    () => [
+      { label: 'Session Status', value: data.currentSession ? 'Open' : 'Not started' },
+      { label: 'Selected Unit', value: data.currentSession?.unit?.name || selectedUnit?.name || '-' },
+      { label: 'Credit Sales', value: creditSales.length },
+      { label: 'Payment Status', value: sessionPayment ? 'Recorded' : 'Pending' },
+    ],
+    [creditSales.length, data.currentSession, selectedUnit, sessionPayment]
   );
 
   const handleOpeningChange = (nozzleId, value) => {
@@ -124,6 +166,35 @@ const DashboardPumpOperatorSession = () => {
     }
   };
 
+  const handleAddCreditSale = async (event) => {
+    event.preventDefault();
+
+    if (!creditSaleForm.customerId || !creditSaleForm.nozzleId) {
+      setError('Please select customer and nozzle');
+      return;
+    }
+
+    setError('');
+    setMessage('');
+
+    try {
+      await api.post('/credit-sales', {
+        unitSessionId: data.currentSession._id,
+        nozzleId: creditSaleForm.nozzleId,
+        customerId: creditSaleForm.customerId,
+        litres: creditSaleForm.litres,
+        pricePerLitre: creditSaleForm.pricePerLitre,
+      });
+
+      setMessage('Credit sale recorded successfully.');
+      setCreditSaleForm({ customerId: '', nozzleId: '', litres: '', pricePerLitre: '' });
+      setIsModalOpen(false);
+      await loadSession();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Unable to record credit sale');
+    }
+  };
+
   const handleEndSession = async (event) => {
     event.preventDefault();
 
@@ -141,7 +212,6 @@ const DashboardPumpOperatorSession = () => {
         closingReadings: closingRows.map((row) => ({
           nozzleId: row.nozzleId,
           reading: row.closingReading,
-          pricePerLitre: row.pricePerLitre,
         })),
       });
 
@@ -149,11 +219,39 @@ const DashboardPumpOperatorSession = () => {
       setSelectedUnitId('');
       setOpeningRows([]);
       setClosingRows([]);
+      setCreditSales([]);
+      setReconciliation(null);
       await loadSession();
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Unable to close unit session');
     }
   };
+
+  const handleSubmitPayment = async () => {
+    const cashCollected = paymentForm.cash;
+    const upiCollected = paymentForm.upi;
+    const cardCollected = paymentForm.card;
+
+    try {
+      const paymentResponse = await api.post(`/session-payments/${data.currentSession._id}`, {
+        cashCollected,
+        upiCollected,
+        cardCollected,
+      });
+
+      setSessionPayment(paymentResponse.data);
+      setMessage('Payment recorded successfully.');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Unable to save payment');
+    }
+  };
+
+  const currencyFormatter = (value) =>
+    new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 2,
+    }).format(value);
 
   return (
     <Layout title="Session" subtitle="Start/end unit sessions with opening and closing readings.">
@@ -163,6 +261,17 @@ const DashboardPumpOperatorSession = () => {
 
       {!loading ? (
         <>
+          <SectionCard title="Session Snapshot" description="Current shift status and reconciliation progress.">
+            <div className="metric-grid">
+              {metrics.map((metric) => (
+                <div key={metric.label} className="metric-card">
+                  <span>{metric.label}</span>
+                  <strong>{metric.value}</strong>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+
           <SectionCard
             title="Available Units"
             description="Pick any available unit to begin work. Occupied units remain locked."
@@ -247,6 +356,143 @@ const DashboardPumpOperatorSession = () => {
             )}
           </SectionCard>
 
+          {data.currentSession ? (
+            <>
+              <SectionCard title="Credit Sales" description="Record credit sales during the shift.">
+                <div className="section-header-actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => setIsModalOpen(true)}
+                  >
+                    Add Credit Sale
+                  </button>
+                </div>
+
+                {isModalOpen ? (
+                  <div className="modal-backdrop">
+                    <div className="modal-panel">
+                      <div className="modal-header">
+                        <h3>Add Credit Sale</h3>
+                        <button
+                          type="button"
+                          className="close-button"
+                          onClick={() => setIsModalOpen(false)}
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <form className="entity-form" onSubmit={handleAddCreditSale}>
+                        <label className="form-field">
+                          <span>Customer</span>
+                          <select
+                            value={creditSaleForm.customerId}
+                            onChange={(e) =>
+                              setCreditSaleForm({ ...creditSaleForm, customerId: e.target.value })
+                            }
+                            required
+                          >
+                            <option value="">Select customer</option>
+                            {data.customers.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name} ({c.phone || 'N/A'})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="form-field">
+                          <span>Nozzle</span>
+                          <select
+                            value={creditSaleForm.nozzleId}
+                            onChange={(e) =>
+                              setCreditSaleForm({ ...creditSaleForm, nozzleId: e.target.value })
+                            }
+                            required
+                          >
+                            <option value="">Select nozzle</option>
+                            {(selectedUnit?.nozzles || data.currentSession?.unit?.nozzles || []).map((n) => (
+                              <option key={n._id} value={n._id}>
+                                {n.nozzleNumber} ({n.tank?.fuelType?.name || 'Fuel'})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="form-field">
+                          <span>Litres</span>
+                          <input
+                            type="number"
+                            step="0.001"
+                            value={creditSaleForm.litres}
+                            onChange={(e) =>
+                              setCreditSaleForm({ ...creditSaleForm, litres: e.target.value })
+                            }
+                            required
+                          />
+                        </label>
+
+                        <label className="form-field">
+                          <span>Price Per Litre (₹)</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={creditSaleForm.pricePerLitre}
+                            onChange={(e) =>
+                              setCreditSaleForm({
+                                ...creditSaleForm,
+                                pricePerLitre: e.target.value,
+                              })
+                            }
+                            required
+                          />
+                        </label>
+
+                        <div className="form-actions">
+                          <button type="submit" className="primary-button">
+                            Save Credit Sale
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() => setIsModalOpen(false)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                ) : null}
+
+                <DataTable
+                  rows={creditSales}
+                  columns={[
+                    { key: 'nozzleNumber', label: 'Nozzle' },
+                    { key: 'customerName', label: 'Customer' },
+                    {
+                      key: 'litres',
+                      label: 'Litres',
+                      render: (row) => row.litres?.toFixed(2) || '-',
+                    },
+                    {
+                      key: 'pricePerLitre',
+                      label: 'Price/L',
+                      render: (row) => currencyFormatter(row.pricePerLitre || 0),
+                    },
+                    {
+                      key: 'totalAmount',
+                      label: 'Total',
+                      render: (row) => currencyFormatter(row.totalAmount || 0),
+                    },
+                  ]}
+                  emptyMessage="No credit sales recorded."
+                />
+              </SectionCard>
+            </>
+          ) : null}
+
           <SectionCard
             title="Closing Reading Form"
             description="Submit final readings and prices to unlock the unit and post the sale."
@@ -272,19 +518,90 @@ const DashboardPumpOperatorSession = () => {
                           }
                         />
                       </label>
-                      <label className="form-field">
-                        <span>Price Per Litre</span>
-                        <input
-                          type="number"
-                          value={row.pricePerLitre}
-                          onChange={(event) =>
-                            handleClosingChange(row.nozzleId, 'pricePerLitre', event.target.value)
-                          }
-                        />
-                      </label>
                     </div>
                   ))}
                 </div>
+
+                {reconciliation ? (
+                  <div className="reconciliation-summary">
+                    <div className="reconciliation-row">
+                      <span>Total Sales</span>
+                      <span>{currencyFormatter(reconciliation.totalSales || 0)}</span>
+                    </div>
+                    <div className="reconciliation-row credit">
+                      <span>Credit Sales</span>
+                      <span>{currencyFormatter(reconciliation.creditSalesTotal || 0)}</span>
+                    </div>
+                    <div className="reconciliation-row expected">
+                      <span>Expected (Cash + UPI + Card)</span>
+                      <span>{currencyFormatter(reconciliation.expectedCollection || 0)}</span>
+                    </div>
+
+                    <div className="section-spacer"></div>
+
+                    <div className="entity-form">
+                      <div className="form-row">
+                        <label className="form-field">
+                          <span>Cash Collected (₹)</span>
+                          <input
+                            type="number"
+                            name="cash"
+                            step="0.01"
+                            value={paymentForm.cash}
+                            onChange={(event) =>
+                              setPaymentForm((current) => ({ ...current, cash: event.target.value }))
+                            }
+                          />
+                        </label>
+                        <label className="form-field">
+                          <span>UPI Collected (₹)</span>
+                          <input
+                            type="number"
+                            name="upi"
+                            step="0.01"
+                            value={paymentForm.upi}
+                            onChange={(event) =>
+                              setPaymentForm((current) => ({ ...current, upi: event.target.value }))
+                            }
+                          />
+                        </label>
+                        <label className="form-field">
+                          <span>Card Collected (₹)</span>
+                          <input
+                            type="number"
+                            name="card"
+                            step="0.01"
+                            value={paymentForm.card}
+                            onChange={(event) =>
+                              setPaymentForm((current) => ({ ...current, card: event.target.value }))
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      {sessionPayment ? (
+                        <>
+                          <div className="reconciliation-row total">
+                            <span>Total Collected</span>
+                            <span>{currencyFormatter(sessionPayment.totalCollected || 0)}</span>
+                          </div>
+                          <div
+                            className={`reconciliation-row ${sessionPayment.difference === 0 ? 'match' : 'mismatch'}`}
+                          >
+                            <span>Difference</span>
+                            <span>{currencyFormatter(Math.abs(sessionPayment.difference) || 0)}</span>
+                          </div>
+                        </>
+                      ) : null}
+
+                      <div className="form-actions">
+                        <button type="button" className="primary-button" onClick={handleSubmitPayment}>
+                          Record Payment
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="form-actions">
                   <button type="submit" className="danger-button">

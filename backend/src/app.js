@@ -1,12 +1,15 @@
 import cors from 'cors';
 import express from 'express';
 import authRoutes from './routes/authRoutes.js';
+import creditSaleRoutes from './routes/creditSaleRoutes.js';
+import customerRoutes from './routes/customerRoutes.js';
 import fuelTypeRoutes from './routes/fuelTypeRoutes.js';
 import fuelPriceRoutes from './routes/fuelPriceRoutes.js';
 import nozzleRoutes from './routes/nozzleRoutes.js';
 import purchaseRoutes from './routes/purchaseRoutes.js';
 import readingRoutes from './routes/readingRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
+import sessionPaymentRoutes from './routes/sessionPaymentRoutes.js';
 import shiftRoutes from './routes/shiftRoutes.js';
 import tankRoutes from './routes/tankRoutes.js';
 import unitRoutes from './routes/unitRoutes.js';
@@ -40,6 +43,9 @@ app.use('/api/shifts', shiftRoutes);
 app.use('/api/readings', readingRoutes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/credit-sales', creditSaleRoutes);
+app.use('/api/session-payments', sessionPaymentRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -24,7 +24,6 @@ const buildForceCloseRows = (session) =>
     nozzleNumber: item.nozzle?.nozzleNumber || 'Nozzle',
     openingReading: item.reading,
     closingReading: '',
-    pricePerLitre: '',
   }));
 
 const DashboardAdminSessions = () => {
@@ -96,7 +95,6 @@ const DashboardAdminSessions = () => {
         closingReadings: forceCloseRows.map((row) => ({
           nozzleId: row.nozzleId,
           reading: row.closingReading,
-          pricePerLitre: row.pricePerLitre,
         })),
       });
 
@@ -120,7 +118,7 @@ const DashboardAdminSessions = () => {
         <>
           <SectionCard
             title="Live Unit Sessions"
-            description="Force close is an admin override and requires closing readings + prices."
+            description="Force close is an admin override and requires closing readings."
           >
             <DataTable
               rows={data.openSessions}
@@ -202,20 +200,6 @@ const DashboardAdminSessions = () => {
                             handleForceCloseRowChange(
                               row.nozzleId,
                               'closingReading',
-                              event.target.value
-                            )
-                          }
-                        />
-                      </label>
-                      <label className="form-field">
-                        <span>Price Per Litre</span>
-                        <input
-                          type="number"
-                          value={row.pricePerLitre}
-                          onChange={(event) =>
-                            handleForceCloseRowChange(
-                              row.nozzleId,
-                              'pricePerLitre',
                               event.target.value
                             )
                           }

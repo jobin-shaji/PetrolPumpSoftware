@@ -43,6 +43,16 @@ const DashboardAnalytics = () => {
     loadAnalytics();
   }, []);
 
+  const metrics = useMemo(
+    () => [
+      { label: 'Revenue', value: currencyFormatter.format(data.profit?.revenue || 0) },
+      { label: 'Cost', value: currencyFormatter.format(data.profit?.cost || 0) },
+      { label: 'Profit', value: currencyFormatter.format(data.profit?.profit || 0) },
+      { label: 'Daily Rows', value: data.daily.length },
+    ],
+    [data.daily.length, data.profit]
+  );
+
   const salesReportRows = useMemo(
     () =>
       data.fuel.map((item) => ({
@@ -72,18 +82,12 @@ const DashboardAnalytics = () => {
         <>
           <SectionCard title="Profit Summary" description="Totals for the selected period.">
             <div className="metric-grid">
-              <div className="metric-card">
-                <span>Revenue</span>
-                <strong>{currencyFormatter.format(data.profit?.revenue || 0)}</strong>
-              </div>
-              <div className="metric-card">
-                <span>Cost</span>
-                <strong>{currencyFormatter.format(data.profit?.cost || 0)}</strong>
-              </div>
-              <div className="metric-card">
-                <span>Profit</span>
-                <strong>{currencyFormatter.format(data.profit?.profit || 0)}</strong>
-              </div>
+              {metrics.map((metric) => (
+                <div key={metric.label} className="metric-card">
+                  <span>{metric.label}</span>
+                  <strong>{metric.value}</strong>
+                </div>
+              ))}
             </div>
           </SectionCard>
 

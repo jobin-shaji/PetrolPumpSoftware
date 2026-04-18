@@ -53,6 +53,17 @@ const DashboardManagerPurchases = () => {
     loadPurchases();
   }, []);
 
+  const metrics = useMemo(() => {
+    const totalLitres = data.purchases.reduce((sum, purchase) => sum + Number(purchase.quantityLitres || 0), 0);
+    const totalCost = data.purchases.reduce((sum, purchase) => sum + Number(purchase.totalCost || 0), 0);
+
+    return [
+      { label: 'Purchases', value: data.purchases.length },
+      { label: 'Litres Purchased', value: totalLitres.toFixed(2) },
+      { label: 'Total Spend', value: currencyFormatter.format(totalCost) },
+    ];
+  }, [data.purchases]);
+
   const tankOptions = useMemo(
     () =>
       data.tanks.map((tank) => ({
@@ -92,6 +103,17 @@ const DashboardManagerPurchases = () => {
 
       {!loading ? (
         <>
+          <SectionCard title="Purchases Snapshot" description="Stock movement and spend summary.">
+            <div className="metric-grid">
+              {metrics.map((metric) => (
+                <div key={metric.label} className="metric-card">
+                  <span>{metric.label}</span>
+                  <strong>{metric.value}</strong>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+
           <SectionCard
             title="Record Fuel Purchase"
             description="Purchases increase the linked tank current level automatically."

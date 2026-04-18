@@ -29,6 +29,15 @@ const defaultUsers = [
   },
 ];
 
+const defaultCustomers = [
+  {
+    name: 'Customer',
+    phone: '1234567890',
+    vehicleNumber: 'KL12A1234',
+    creditLimit: 100000,
+  },
+];
+
 export const ensureSeedData = async () => {
   const db = getDb();
 
@@ -71,7 +80,7 @@ export const ensureSeedData = async () => {
               INSERT INTO tanks (fuel_type_id, capacity, current_level)
               VALUES ($1, $2, $3)
             `,
-            [fuelType.id, 10000, 5000]
+            [fuelType.id, 10000, 0]
           )
         )
       );
@@ -151,6 +160,24 @@ export const ensureSeedData = async () => {
               ON CONFLICT (nozzle_number) DO NOTHING
             `,
             [tankByFuelName.get(item.fuelTypeName), item.nozzleNumber, unitByName.get(item.unitName)]
+          )
+        )
+      );
+    }
+
+    const { rows: customerCountRows } = await tx.query('SELECT COUNT(*)::int AS count FROM customers');
+    const customerCount = customerCountRows[0]?.count ?? 0;
+
+    if (customerCount === 0) {
+      await Promise.all(
+        defaultCustomers.map((customer) =>
+          tx.query(
+            `
+              INSERT INTO customers (name, phone, vehicle_number, credit_limit, current_balance)
+              VALUES ($1, $2, $3, $4, 0)
+              ON CONFLICT DO NOTHING
+            `,
+            [customer.name, customer.phone, customer.vehicleNumber, customer.creditLimit]
           )
         )
       );

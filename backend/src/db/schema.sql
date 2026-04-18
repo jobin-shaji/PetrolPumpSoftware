@@ -138,6 +138,57 @@ CREATE TABLE IF NOT EXISTS purchases (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS customers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  phone TEXT,
+  vehicle_number TEXT,
+  credit_limit NUMERIC(14, 3) NOT NULL DEFAULT 0 CHECK (credit_limit >= 0),
+  current_balance NUMERIC(14, 3) NOT NULL DEFAULT 0 CHECK (current_balance >= 0),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS credit_sales (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  unit_session_id UUID NOT NULL REFERENCES unit_sessions(id) ON DELETE CASCADE,
+  nozzle_id UUID NOT NULL REFERENCES nozzles(id),
+  customer_id UUID NOT NULL REFERENCES customers(id),
+  litres NUMERIC(14, 3) NOT NULL CHECK (litres > 0),
+  price_per_litre NUMERIC(14, 3) NOT NULL CHECK (price_per_litre > 0),
+  total_amount NUMERIC(14, 3) NOT NULL CHECK (total_amount > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS credit_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id UUID NOT NULL REFERENCES customers(id),
+  credit_sale_id UUID REFERENCES credit_sales(id) ON DELETE SET NULL,
+  transaction_type TEXT NOT NULL CHECK (transaction_type IN ('debit', 'credit')),
+  amount NUMERIC(14, 3) NOT NULL CHECK (amount > 0),
+  description TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS session_payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  unit_session_id UUID NOT NULL UNIQUE REFERENCES unit_sessions(id) ON DELETE CASCADE,
+  cash_collected NUMERIC(14, 3) NOT NULL DEFAULT 0 CHECK (cash_collected >= 0),
+  upi_collected NUMERIC(14, 3) NOT NULL DEFAULT 0 CHECK (upi_collected >= 0),
+  card_collected NUMERIC(14, 3) NOT NULL DEFAULT 0 CHECK (card_collected >= 0),
+  total_collected NUMERIC(14, 3) NOT NULL DEFAULT 0 CHECK (total_collected >= 0),
+  total_sales NUMERIC(14, 3) NOT NULL DEFAULT 0,
+  credit_sales_total NUMERIC(14, 3) NOT NULL DEFAULT 0,
+  expected_collection NUMERIC(14, 3) NOT NULL DEFAULT 0,
+  difference NUMERIC(14, 3) NOT NULL DEFAULT 0,
+  reconciled BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS unit_sessions_open_unit_idx
   ON unit_sessions (unit_id)
   WHERE status = 'open';
@@ -163,3 +214,12 @@ CREATE INDEX IF NOT EXISTS unit_session_nozzle_readings_closed_at_idx
   ON unit_session_nozzle_readings (closed_at);
 CREATE INDEX IF NOT EXISTS unit_sessions_start_time_idx ON unit_sessions (start_time);
 CREATE INDEX IF NOT EXISTS shifts_start_time_idx ON shifts (start_time);
+CREATE INDEX IF NOT EXISTS customers_phone_idx ON customers (phone);
+CREATE INDEX IF NOT EXISTS customers_vehicle_number_idx ON customers (vehicle_number);
+CREATE INDEX IF NOT EXISTS credit_sales_session_id_idx ON credit_sales (unit_session_id);
+CREATE INDEX IF NOT EXISTS credit_sales_nozzle_id_idx ON credit_sales (nozzle_id);
+CREATE INDEX IF NOT EXISTS credit_sales_customer_id_idx ON credit_sales (customer_id);
+CREATE INDEX IF NOT EXISTS credit_transactions_customer_id_idx ON credit_transactions (customer_id);
+CREATE INDEX IF NOT EXISTS credit_transactions_created_at_idx ON credit_transactions (created_at);
+CREATE INDEX IF NOT EXISTS session_payments_session_id_idx ON session_payments (unit_session_id);
+CREATE INDEX IF NOT EXISTS session_payments_created_at_idx ON session_payments (created_at);

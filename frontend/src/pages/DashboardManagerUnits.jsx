@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AlertBox from '../components/AlertBox.jsx';
 import DataTable from '../components/DataTable.jsx';
 import Layout from '../components/Layout.jsx';
@@ -31,41 +31,67 @@ const DashboardManagerUnits = () => {
     loadUnits();
   }, []);
 
+  const metrics = useMemo(
+    () => {
+      const occupiedUnits = units.filter((unit) => unit.status === 'occupied');
+
+      return [
+        { label: 'Total Units', value: units.length },
+        { label: 'Occupied', value: occupiedUnits.length },
+        { label: 'Available', value: units.length - occupiedUnits.length },
+      ];
+    },
+    [units]
+  );
+
   return (
     <Layout title="Units" subtitle="Monitor unit availability and occupancy.">
       {loading ? <div className="page-state">Loading units...</div> : null}
       <AlertBox message={error} variant="error" />
 
       {!loading ? (
-        <SectionCard
-          title="Unit Availability"
-          description="Pump operators choose units at session start, and units remain locked until session close."
-        >
-          <DataTable
-            rows={units}
-            columns={[
-              { key: 'name', label: 'Unit' },
-              { key: 'status', label: 'Status' },
-              {
-                key: 'assignedTo',
-                label: 'Occupied By',
-                render: (row) => row.assignedTo?.name || '-',
-              },
-              {
-                key: 'activeSession',
-                label: 'Session Started',
-                render: (row) => formatDateTime(row.activeSession?.startTime),
-              },
-              {
-                key: 'nozzles',
-                label: 'Nozzles',
-                render: (row) =>
-                  row.nozzles?.length ? row.nozzles.map((n) => n.nozzleNumber).join(', ') : '-',
-              },
-            ]}
-            emptyMessage="No units configured."
-          />
-        </SectionCard>
+        <>
+          <SectionCard title="Units Snapshot" description="Live availability and session state at a glance.">
+            <div className="metric-grid">
+              {metrics.map((metric) => (
+                <div key={metric.label} className="metric-card">
+                  <span>{metric.label}</span>
+                  <strong>{metric.value}</strong>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Unit Availability"
+            description="Pump operators choose units at session start, and units remain locked until session close."
+          >
+            <DataTable
+              rows={units}
+              columns={[
+                { key: 'name', label: 'Unit' },
+                { key: 'status', label: 'Status' },
+                {
+                  key: 'assignedTo',
+                  label: 'Occupied By',
+                  render: (row) => row.assignedTo?.name || '-',
+                },
+                {
+                  key: 'activeSession',
+                  label: 'Session Started',
+                  render: (row) => formatDateTime(row.activeSession?.startTime),
+                },
+                {
+                  key: 'nozzles',
+                  label: 'Nozzles',
+                  render: (row) =>
+                    row.nozzles?.length ? row.nozzles.map((n) => n.nozzleNumber).join(', ') : '-',
+                },
+              ]}
+              emptyMessage="No units configured."
+            />
+          </SectionCard>
+        </>
       ) : null}
     </Layout>
   );
